@@ -1,192 +1,120 @@
 
-
-# Plan: Update Setup Columns Modal with Correct Database Field Mappings
+# Asset List View - Fixed Column Positions Implementation Plan
 
 ## Overview
-Update the `AssetColumnSettings.tsx` component to include all requested fields organized into three categories: **Asset Fields**, **Linking Fields**, and **Event Fields**. This will also require updates to `AssetsList.tsx` to render the new columns with correct database field connections.
+Implement a system-controlled column order for the Asset List View where positions are fixed based on an `order_index`. Users can toggle column visibility but cannot reorder columns. Re-enabled columns return to their original fixed positions.
 
-## Database Schema Analysis
+## Defined Column Order (per requirements)
 
-After reviewing the `itam_assets` table schema, here are the verified database fields:
+| Index | Column ID | Label | Required |
+|-------|-----------|-------|----------|
+| 0 | asset_tag | Asset Tag ID | Yes (always visible, cannot disable) |
+| 1 | category | Category | No |
+| 2 | status | Status | No |
+| 3 | make | Make | No |
+| 4 | model | Model | No |
+| 5 | serial_number | Serial No | No |
+| 6 | assigned_to | Assigned To | No |
+| 7 | asset_configuration | Asset Configuration | No |
+| 8 | description | Description | No |
+| 9 | cost | Cost | No |
+| 10 | purchase_date | Purchase Date | No |
+| 11 | purchased_from | Purchased From | No |
+| 12 | asset_classification | Asset Classification | No |
+| 13 | department | Department | No |
+| 14 | location | Location | No |
+| 15 | site | Site | No |
+| 16 | asset_photo | Asset Photo | No |
+| 17 | event_date | Event Date | No |
+| 18 | event_due_date | Event Due Date | No |
+| 19 | event_notes | Event Notes | No |
+| 20 | created_by | Created By | No |
+| 21 | created_at | Date Created | No |
 
-### itam_assets Table Fields (Verified from types.ts)
-```
-id: string
-asset_id: string
-asset_tag: string | null
-name: string
-description: string | null
-model: string | null
-serial_number: string | null
-status: string | null
-purchase_price: number | null
-purchase_date: string | null
-warranty_expiry: string | null
-notes: string | null
-qr_code: string | null
-created_at: string | null
-created_by: string | null          <- UUID reference to users table
-updated_at: string | null
-updated_by: string | null
-is_active: boolean | null
-custom_fields: Json | null         <- Contains: photo_url, asset_configuration, classification, currency, vendor, site_id
-assigned_to: string | null
-checked_out_at: string | null      <- Event Date
-checked_out_to: string | null
-check_out_notes: string | null     <- Event Notes
-expected_return_date: string | null <- Event Due Date
-category_id: string | null         <- FK to itam_categories
-department_id: string | null       <- FK to itam_departments
-location_id: string | null         <- FK to itam_locations (which has site_id FK to itam_sites)
-make_id: string | null             <- FK to itam_makes
-vendor_id: string | null           <- FK to itam_vendors
-```
+## Implementation Steps
 
-### Related Tables for Joins
-- `itam_categories` -> name
-- `itam_departments` -> name
-- `itam_locations` -> name, site_id (FK to itam_sites)
-- `itam_sites` -> name
-- `itam_makes` -> name
-- `itam_vendors` -> name
-- `users` -> name (for created_by lookup)
+### Step 1: Update AssetColumnSettings.tsx
+**Changes:**
+- Add `order_index` property to each column definition
+- Update `DEFAULT_ASSET_COLUMNS` with the new fixed order
+- Remove drag-and-drop reordering functionality (remove `GripVertical` icon)
+- Ensure columns are always sorted by `order_index` when retrieved
+- Mark Asset Tag ID as `required: true` and `locked: true`
 
----
+### Step 2: Update AssetsList.tsx
+**Changes:**
+- Modify column retrieval to always sort by `order_index`
+- Ensure visible columns maintain their fixed positions
+- Add "Asset Photo" column as a button that opens the image on click
 
-## Complete Field-to-Database Mapping
+### Step 3: Update getAssetColumnSettings() Helper
+**Changes:**
+- Always sort returned columns by `order_index`
+- When merging saved settings with defaults, preserve `order_index` from defaults (ignore any saved order changes from previous versions)
 
-| UI Field | Column ID | DB Field / Source | Notes |
-|----------|-----------|-------------------|-------|
-| **ASSET FIELDS** | | | |
-| Asset Photo | `asset_photo` | `custom_fields.photo_url` | URL from asset-photos storage bucket |
-| Asset Tag ID | `asset_tag` | `asset_tag` | Direct field (required/locked) |
-| Make | `make` | `make_id` -> `itam_makes.name` | Join required |
-| Cost | `cost` | `purchase_price` | Renamed label for display |
-| Created By | `created_by` | `created_by` -> `users.name` | Join to users table needed |
-| Date Created | `created_at` | `created_at` | Direct field |
-| Description | `description` | `description` | Direct field |
-| Model | `model` | `model` | Direct field |
-| Purchase Date | `purchase_date` | `purchase_date` | Direct field |
-| Purchased From | `purchased_from` | `vendor_id` -> `itam_vendors.name` | Join required |
-| Serial No | `serial_number` | `serial_number` | Direct field |
-| Asset Classification | `asset_classification` | `custom_fields.classification` | JSON field |
-| Asset Configuration | `asset_configuration` | `custom_fields.asset_configuration` | JSON field |
-| **LINKING FIELDS** | | | |
-| Category | `category` | `category_id` -> `itam_categories.name` | Existing join |
-| Department | `department` | `department_id` -> `itam_departments.name` | Existing join |
-| Location | `location` | `location_id` -> `itam_locations.name` | Existing join |
-| Site | `site` | `location.site_id` -> `itam_sites.name` | Nested join via location |
-| **EVENT FIELDS** | | | |
-| Assigned To | `assigned_to` | `assigned_to` | Direct field (text) |
-| Event Date | `event_date` | `checked_out_at` | Direct field |
-| Event Due Date | `event_due_date` | `expected_return_date` | Direct field |
-| Event Notes | `event_notes` | `check_out_notes` | Direct field |
-| Status | `status` | `status` | Direct field |
+### Step 4: Update Column Settings Dialog UI
+**Changes:**
+- Remove drag handle icons since reordering is disabled
+- Display columns grouped by category but in fixed order within each group
+- Show clear indication that Asset Tag ID cannot be disabled
 
----
+### Step 5: Export Functionality (Future-Ready)
+**Changes:**
+- Update `handleExportToExcel` in AssetModuleTopBar.tsx to use the fixed column order
+- Export only visible columns in the correct `order_index` sequence
 
-## Technical Implementation
+### Step 6: Saved Views Integration (Future-Ready)
+**Note:** The current asset module does not have saved views yet (unlike the helpdesk tickets module), but the column structure will be compatible when implemented.
 
-### 1. Update `AssetColumnSettings.tsx`
+## Technical Details
 
-**Add category support to interface:**
+### Updated DEFAULT_ASSET_COLUMNS Structure
 ```typescript
-export interface AssetColumn {
-  id: string;
-  label: string;
-  visible: boolean;
-  locked?: boolean;
-  category?: "asset" | "linking" | "event";
-}
-```
-
-**Replace DEFAULT_ASSET_COLUMNS with new structure (22 columns):**
-
-```typescript
-const DEFAULT_ASSET_COLUMNS: AssetColumn[] = [
-  // Asset Fields
-  { id: "asset_photo", label: "Asset Photo", visible: false, category: "asset" },
-  { id: "asset_tag", label: "Asset Tag ID", visible: true, locked: true, category: "asset" },
-  { id: "make", label: "Make", visible: true, category: "asset" },
-  { id: "cost", label: "Cost", visible: true, category: "asset" },
-  { id: "created_by", label: "Created By", visible: false, category: "asset" },
-  { id: "created_at", label: "Date Created", visible: false, category: "asset" },
-  { id: "description", label: "Description", visible: false, category: "asset" },
-  { id: "model", label: "Model", visible: true, category: "asset" },
-  { id: "purchase_date", label: "Purchase Date", visible: false, category: "asset" },
-  { id: "purchased_from", label: "Purchased From", visible: false, category: "asset" },
-  { id: "serial_number", label: "Serial No", visible: true, category: "asset" },
-  { id: "asset_classification", label: "Asset Classification", visible: false, category: "asset" },
-  { id: "asset_configuration", label: "Asset Configuration", visible: false, category: "asset" },
-  
-  // Linking Fields
-  { id: "category", label: "Category", visible: true, category: "linking" },
-  { id: "department", label: "Department", visible: false, category: "linking" },
-  { id: "location", label: "Location", visible: true, category: "linking" },
-  { id: "site", label: "Site", visible: false, category: "linking" },
-  
-  // Event Fields
-  { id: "assigned_to", label: "Assigned To", visible: true, category: "event" },
-  { id: "event_date", label: "Event Date", visible: false, category: "event" },
-  { id: "event_due_date", label: "Event Due Date", visible: false, category: "event" },
-  { id: "event_notes", label: "Event Notes", visible: false, category: "event" },
-  { id: "status", label: "Status", visible: true, category: "event" },
+const SYSTEM_COLUMN_ORDER: AssetColumn[] = [
+  { id: "asset_tag", label: "Asset Tag ID", visible: true, locked: true, required: true, order_index: 0 },
+  { id: "category", label: "Category", visible: true, order_index: 1 },
+  { id: "status", label: "Status", visible: true, order_index: 2 },
+  { id: "make", label: "Make", visible: true, order_index: 3 },
+  { id: "model", label: "Model", visible: true, order_index: 4 },
+  { id: "serial_number", label: "Serial No", visible: true, order_index: 5 },
+  { id: "assigned_to", label: "Assigned To", visible: true, order_index: 6 },
+  { id: "asset_configuration", label: "Asset Configuration", visible: false, order_index: 7 },
+  { id: "description", label: "Description", visible: false, order_index: 8 },
+  { id: "cost", label: "Cost", visible: true, order_index: 9 },
+  { id: "purchase_date", label: "Purchase Date", visible: false, order_index: 10 },
+  { id: "purchased_from", label: "Purchased From", visible: false, order_index: 11 },
+  { id: "asset_classification", label: "Asset Classification", visible: false, order_index: 12 },
+  { id: "department", label: "Department", visible: false, order_index: 13 },
+  { id: "location", label: "Location", visible: true, order_index: 14 },
+  { id: "site", label: "Site", visible: false, order_index: 15 },
+  { id: "asset_photo", label: "Asset Photo", visible: false, order_index: 16 },
+  { id: "event_date", label: "Event Date", visible: false, order_index: 17 },
+  { id: "event_due_date", label: "Event Due Date", visible: false, order_index: 18 },
+  { id: "event_notes", label: "Event Notes", visible: false, order_index: 19 },
+  { id: "created_by", label: "Created By", visible: false, order_index: 20 },
+  { id: "created_at", label: "Date Created", visible: false, order_index: 21 },
 ];
 ```
 
-**Update UI to show category headers** in the scroll area with section dividers.
+### Key Behaviors
+1. **Fixed Positions**: Columns always appear in `order_index` order regardless of visibility changes
+2. **Toggle Only**: Column settings dialog only allows show/hide, no drag-and-drop
+3. **Persistence**: localStorage saves only visibility state, not order (order is always system-defined)
+4. **Migration**: Existing saved settings will be migrated to use the new fixed order
 
-### 2. Update `AssetsList.tsx`
-
-**Update Supabase query to include additional joins:**
-```typescript
-let query = supabase.from("itam_assets").select(`
-  *,
-  category:itam_categories(id, name),
-  location:itam_locations(id, name, site:itam_sites(id, name)),
-  department:itam_departments(id, name),
-  make:itam_makes(id, name),
-  vendor:itam_vendors(id, name),
-  creator:users!itam_assets_created_by_fkey(id, name)
-`)
-```
-
-**Expand renderCell function** to handle all new column IDs:
-- `asset_photo`: Display thumbnail from `custom_fields.photo_url` or placeholder
-- `cost`: Map to `purchase_price` with currency formatting
-- `created_by`: Display `creator.name` from joined users table
-- `description`: Show truncated text
-- `purchased_from`: Display `vendor.name`
-- `asset_classification`: Parse `custom_fields.classification` JSON
-- `asset_configuration`: Display `custom_fields.asset_configuration`
-- `site`: Display `location.site.name` (nested join)
-- `event_date`: Format `checked_out_at`
-- `event_due_date`: Format `expected_return_date`
-- `event_notes`: Display `check_out_notes`
-
----
+### Asset Photo Column
+The Asset Photo column will render as a button. When clicked:
+- If photo exists: Opens a modal/preview showing the full image
+- If no photo: Shows a placeholder icon indicating no photo available
 
 ## Files to Modify
+1. `src/components/helpdesk/assets/AssetColumnSettings.tsx` - Column definitions and settings dialog
+2. `src/components/helpdesk/assets/AssetsList.tsx` - Table rendering with fixed order
+3. `src/components/helpdesk/assets/AssetModuleTopBar.tsx` - Export functionality alignment
 
-1. **`src/components/helpdesk/assets/AssetColumnSettings.tsx`**
-   - Add `category` property to `AssetColumn` interface
-   - Replace column definitions with 22 categorized columns
-   - Add category section headers in the UI
-
-2. **`src/components/helpdesk/assets/AssetsList.tsx`**
-   - Update Supabase select query with nested joins for site and creator
-   - Expand `renderCell` switch statement for all new columns
-   - Add helper functions for displaying photos, classifications, etc.
-
----
-
-## Key Corrections from Previous Plan
-
-| Field | Previous Assumption | Actual DB Field |
-|-------|---------------------|-----------------|
-| Asset Photo | Storage bucket only | `custom_fields.photo_url` (stores URL) |
-| Site | Direct `site_id` on asset | Via `location.site_id` (nested through location) |
-| Purchased From | `vendor` text field | `vendor_id` FK to `itam_vendors` |
-| Created By | Just UUID display | Needs join to `users` table for name |
-| Classification | `custom_fields.classification` | Correct - stores as JSON object |
-
+## Validation Checklist
+- Asset Tag ID is always first column
+- Asset Tag ID cannot be hidden
+- Hidden columns retain their position when re-enabled
+- Column order matches the defined specification
+- Export uses the same fixed column order
