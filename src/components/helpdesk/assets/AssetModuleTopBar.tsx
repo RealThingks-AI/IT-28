@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Plus, Settings, FileSpreadsheet, Settings2, Search, X } from "lucide-react";
-import { AssetColumnSettings } from "./AssetColumnSettings";
+import { AssetColumnSettings, getAssetColumnSettings, SYSTEM_COLUMN_ORDER } from "./AssetColumnSettings";
 import { toast } from "sonner";
 import {
   Tooltip,
@@ -34,7 +34,15 @@ export function AssetModuleTopBar({
   const [localSearch, setLocalSearch] = useState("");
 
   const handleExportToExcel = () => {
-    toast.info("Export feature coming soon");
+    // Get visible columns in fixed order for export
+    const columns = getAssetColumnSettings();
+    const visibleColumns = columns
+      .filter(c => c.visible)
+      .sort((a, b) => a.order_index - b.order_index);
+    
+    // Log for debugging - actual export implementation would use these columns
+    console.log("Exporting columns in fixed order:", visibleColumns.map(c => c.label));
+    toast.info("Export feature coming soon - columns will follow fixed order");
   };
 
   const handleSearchSubmit = (e: React.FormEvent) => {

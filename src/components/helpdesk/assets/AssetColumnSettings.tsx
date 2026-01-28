@@ -10,44 +10,42 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { GripVertical, RotateCcw } from "lucide-react";
+import { RotateCcw, Lock } from "lucide-react";
 
 export interface AssetColumn {
   id: string;
   label: string;
   visible: boolean;
   locked?: boolean;
+  required?: boolean;
+  order_index: number;
   category?: "asset" | "linking" | "event";
 }
 
-const DEFAULT_ASSET_COLUMNS: AssetColumn[] = [
-  // Asset Fields
-  { id: "asset_photo", label: "Asset Photo", visible: false, category: "asset" },
-  { id: "asset_tag", label: "Asset Tag ID", visible: true, locked: true, category: "asset" },
-  { id: "make", label: "Make", visible: true, category: "asset" },
-  { id: "cost", label: "Cost", visible: true, category: "asset" },
-  { id: "created_by", label: "Created By", visible: false, category: "asset" },
-  { id: "created_at", label: "Date Created", visible: false, category: "asset" },
-  { id: "description", label: "Description", visible: false, category: "asset" },
-  { id: "model", label: "Model", visible: true, category: "asset" },
-  { id: "purchase_date", label: "Purchase Date", visible: false, category: "asset" },
-  { id: "purchased_from", label: "Purchased From", visible: false, category: "asset" },
-  { id: "serial_number", label: "Serial No", visible: true, category: "asset" },
-  { id: "asset_classification", label: "Asset Classification", visible: false, category: "asset" },
-  { id: "asset_configuration", label: "Asset Configuration", visible: false, category: "asset" },
-  
-  // Linking Fields
-  { id: "category", label: "Category", visible: true, category: "linking" },
-  { id: "department", label: "Department", visible: false, category: "linking" },
-  { id: "location", label: "Location", visible: true, category: "linking" },
-  { id: "site", label: "Site", visible: false, category: "linking" },
-  
-  // Event Fields
-  { id: "assigned_to", label: "Assigned To", visible: true, category: "event" },
-  { id: "event_date", label: "Event Date", visible: false, category: "event" },
-  { id: "event_due_date", label: "Event Due Date", visible: false, category: "event" },
-  { id: "event_notes", label: "Event Notes", visible: false, category: "event" },
-  { id: "status", label: "Status", visible: true, category: "event" },
+// System-controlled column order - positions are FIXED and cannot be changed by users
+const SYSTEM_COLUMN_ORDER: AssetColumn[] = [
+  { id: "asset_tag", label: "Asset Tag ID", visible: true, locked: true, required: true, order_index: 0, category: "asset" },
+  { id: "category", label: "Category", visible: true, order_index: 1, category: "linking" },
+  { id: "status", label: "Status", visible: true, order_index: 2, category: "event" },
+  { id: "make", label: "Make", visible: true, order_index: 3, category: "asset" },
+  { id: "model", label: "Model", visible: true, order_index: 4, category: "asset" },
+  { id: "serial_number", label: "Serial No", visible: true, order_index: 5, category: "asset" },
+  { id: "assigned_to", label: "Assigned To", visible: true, order_index: 6, category: "event" },
+  { id: "asset_configuration", label: "Asset Configuration", visible: false, order_index: 7, category: "asset" },
+  { id: "description", label: "Description", visible: false, order_index: 8, category: "asset" },
+  { id: "cost", label: "Cost", visible: true, order_index: 9, category: "asset" },
+  { id: "purchase_date", label: "Purchase Date", visible: false, order_index: 10, category: "asset" },
+  { id: "purchased_from", label: "Purchased From", visible: false, order_index: 11, category: "asset" },
+  { id: "asset_classification", label: "Asset Classification", visible: false, order_index: 12, category: "asset" },
+  { id: "department", label: "Department", visible: false, order_index: 13, category: "linking" },
+  { id: "location", label: "Location", visible: true, order_index: 14, category: "linking" },
+  { id: "site", label: "Site", visible: false, order_index: 15, category: "linking" },
+  { id: "asset_photo", label: "Asset Photo", visible: false, order_index: 16, category: "asset" },
+  { id: "event_date", label: "Event Date", visible: false, order_index: 17, category: "event" },
+  { id: "event_due_date", label: "Event Due Date", visible: false, order_index: 18, category: "event" },
+  { id: "event_notes", label: "Event Notes", visible: false, order_index: 19, category: "event" },
+  { id: "created_by", label: "Created By", visible: false, order_index: 20, category: "asset" },
+  { id: "created_at", label: "Date Created", visible: false, order_index: 21, category: "asset" },
 ];
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -56,7 +54,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   event: "Event Fields",
 };
 
-const STORAGE_KEY = "asset-column-settings";
+const STORAGE_KEY = "asset-column-settings-v2";
 
 interface AssetColumnSettingsProps {
   open: boolean;
@@ -67,30 +65,15 @@ interface AssetColumnSettingsProps {
 export function AssetColumnSettings({ open, onOpenChange, onColumnsChange }: AssetColumnSettingsProps) {
   const [columns, setColumns] = useState<AssetColumn[]>([]);
 
-  // Load saved columns on mount
+  // Load saved columns on mount - only visibility state is persisted, order is always from SYSTEM_COLUMN_ORDER
   useEffect(() => {
-    const savedColumns = localStorage.getItem(STORAGE_KEY);
-    if (savedColumns) {
-      try {
-        const parsed = JSON.parse(savedColumns);
-        // Merge with defaults to handle new columns added after user saved
-        const merged = DEFAULT_ASSET_COLUMNS.map(defaultCol => {
-          const saved = parsed.find((c: AssetColumn) => c.id === defaultCol.id);
-          return saved ? { ...defaultCol, visible: saved.visible } : defaultCol;
-        });
-        setColumns(merged);
-      } catch {
-        setColumns([...DEFAULT_ASSET_COLUMNS]);
-      }
-    } else {
-      setColumns([...DEFAULT_ASSET_COLUMNS]);
-    }
+    setColumns(getAssetColumnSettings());
   }, [open]);
 
   const handleToggle = (columnId: string, checked: boolean) => {
     setColumns(prev =>
       prev.map(col =>
-        col.id === columnId && !col.locked
+        col.id === columnId && !col.locked && !col.required
           ? { ...col, visible: checked }
           : col
       )
@@ -98,11 +81,13 @@ export function AssetColumnSettings({ open, onOpenChange, onColumnsChange }: Ass
   };
 
   const handleReset = () => {
-    setColumns([...DEFAULT_ASSET_COLUMNS]);
+    setColumns([...SYSTEM_COLUMN_ORDER]);
   };
 
   const handleSave = () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(columns));
+    // Only save visibility state, order_index is always from system
+    const visibilityState = columns.map(col => ({ id: col.id, visible: col.visible }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(visibilityState));
     onColumnsChange?.(columns);
     onOpenChange(false);
   };
@@ -113,13 +98,13 @@ export function AssetColumnSettings({ open, onOpenChange, onColumnsChange }: Ass
 
   const handleHideAll = () => {
     setColumns(prev =>
-      prev.map(col => (col.locked ? col : { ...col, visible: false }))
+      prev.map(col => (col.locked || col.required ? col : { ...col, visible: false }))
     );
   };
 
   const visibleCount = columns.filter(c => c.visible).length;
 
-  // Group columns by category
+  // Group columns by category while maintaining order_index within each group
   const groupedColumns = columns.reduce((acc, col) => {
     const category = col.category || "asset";
     if (!acc[category]) {
@@ -128,6 +113,11 @@ export function AssetColumnSettings({ open, onOpenChange, onColumnsChange }: Ass
     acc[category].push(col);
     return acc;
   }, {} as Record<string, AssetColumn[]>);
+
+  // Sort each group by order_index
+  Object.keys(groupedColumns).forEach(category => {
+    groupedColumns[category].sort((a, b) => a.order_index - b.order_index);
+  });
 
   const categoryOrder = ["asset", "linking", "event"];
 
@@ -142,6 +132,10 @@ export function AssetColumnSettings({ open, onOpenChange, onColumnsChange }: Ass
             </span>
           </DialogTitle>
         </DialogHeader>
+
+        <p className="text-xs text-muted-foreground mb-2">
+          Column order is system-controlled. You can only show or hide columns.
+        </p>
 
         <div className="flex items-center gap-2 mb-2">
           <Button variant="outline" size="sm" onClick={handleShowAll}>
@@ -175,20 +169,22 @@ export function AssetColumnSettings({ open, onOpenChange, onColumnsChange }: Ass
                         key={column.id}
                         className="flex items-center gap-3 p-2 rounded-md hover:bg-muted/50 transition-colors"
                       >
-                        <GripVertical className="h-4 w-4 text-muted-foreground/50 cursor-grab" />
                         <Checkbox
                           id={`col-${column.id}`}
                           checked={column.visible}
                           onCheckedChange={(checked) => handleToggle(column.id, !!checked)}
-                          disabled={column.locked}
+                          disabled={column.locked || column.required}
                         />
                         <Label
                           htmlFor={`col-${column.id}`}
-                          className={`flex-1 cursor-pointer ${column.locked ? "text-muted-foreground" : ""}`}
+                          className={`flex-1 cursor-pointer ${column.locked || column.required ? "text-muted-foreground" : ""}`}
                         >
                           {column.label}
-                          {column.locked && (
-                            <span className="ml-2 text-xs text-muted-foreground">(required)</span>
+                          {(column.locked || column.required) && (
+                            <span className="ml-2 inline-flex items-center gap-1 text-xs text-muted-foreground">
+                              <Lock className="h-3 w-3" />
+                              required
+                            </span>
                           )}
                         </Label>
                       </div>
@@ -211,21 +207,23 @@ export function AssetColumnSettings({ open, onOpenChange, onColumnsChange }: Ass
   );
 }
 
-// Export helper to get current column settings
+// Export helper to get current column settings - always sorted by order_index
 export function getAssetColumnSettings(): AssetColumn[] {
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
     try {
-      const parsed = JSON.parse(saved);
-      return DEFAULT_ASSET_COLUMNS.map(defaultCol => {
-        const savedCol = parsed.find((c: AssetColumn) => c.id === defaultCol.id);
-        return savedCol ? { ...defaultCol, visible: savedCol.visible } : defaultCol;
-      });
+      const parsed = JSON.parse(saved) as { id: string; visible: boolean }[];
+      // Merge saved visibility with system-defined columns (order is always from system)
+      return SYSTEM_COLUMN_ORDER.map(systemCol => {
+        const savedCol = parsed.find(c => c.id === systemCol.id);
+        return savedCol ? { ...systemCol, visible: savedCol.visible } : systemCol;
+      }).sort((a, b) => a.order_index - b.order_index);
     } catch {
-      return [...DEFAULT_ASSET_COLUMNS];
+      return [...SYSTEM_COLUMN_ORDER].sort((a, b) => a.order_index - b.order_index);
     }
   }
-  return [...DEFAULT_ASSET_COLUMNS];
+  return [...SYSTEM_COLUMN_ORDER].sort((a, b) => a.order_index - b.order_index);
 }
 
-export { DEFAULT_ASSET_COLUMNS };
+// Export for use in exports and other features
+export { SYSTEM_COLUMN_ORDER };
