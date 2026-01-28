@@ -9,9 +9,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ImageIcon } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { format } from "date-fns";
 import { getAssetColumnSettings, AssetColumn } from "./AssetColumnSettings";
+import { AssetPhotoPreview } from "./AssetPhotoPreview";
 
 interface AssetsListProps {
   filters?: Record<string, any>;
@@ -36,9 +37,11 @@ export function AssetsList({
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
   const [visibleColumns, setVisibleColumns] = useState<AssetColumn[]>([]);
 
-  // Load column settings
+  // Load column settings - always sorted by order_index
   useEffect(() => {
-    setVisibleColumns(getAssetColumnSettings());
+    const columns = getAssetColumnSettings();
+    // Ensure columns are always sorted by order_index
+    setVisibleColumns(columns.sort((a, b) => a.order_index - b.order_index));
   }, []);
 
   // Reset page when filters change
@@ -264,8 +267,10 @@ export function AssetsList({
     }
   };
 
-  // Get visible columns
-  const activeColumns = visibleColumns.filter((c) => c.visible);
+  // Get visible columns - sorted by order_index (fixed positions)
+  const activeColumns = visibleColumns
+    .filter((c) => c.visible)
+    .sort((a, b) => a.order_index - b.order_index);
 
   // Render cell based on column ID
   const renderCell = (asset: any, columnId: string) => {
@@ -274,19 +279,11 @@ export function AssetsList({
     switch (columnId) {
       case "asset_photo":
         const photoUrl = customFields.photo_url;
-        if (photoUrl) {
-          return (
-            <img
-              src={photoUrl}
-              alt="Asset"
-              className="h-8 w-8 rounded object-cover"
-            />
-          );
-        }
         return (
-          <div className="h-8 w-8 rounded bg-muted flex items-center justify-center">
-            <ImageIcon className="h-4 w-4 text-muted-foreground" />
-          </div>
+          <AssetPhotoPreview 
+            photoUrl={photoUrl} 
+            assetName={asset.name || asset.asset_tag} 
+          />
         );
 
       case "asset_tag":
