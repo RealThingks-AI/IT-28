@@ -1,120 +1,162 @@
+/* Fonts loaded via index.html for better performance */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+.writing-mode-vertical {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
 /* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
 All colors MUST be HSL.
+
+Font System:
+- Inter (sans): Primary UI font for body text, menus, buttons, forms
+- DM Serif Display (serif/display): For hero headings, feature titles, special sections
+Use font-sans, font-serif, or font-display utility classes in Tailwind
 */
 
 @layer base {
   :root {
-    --background: 210 20% 98%;
-    --foreground: 215 25% 15%;
+    /* Professional SaaS Color System */
+    --background: 209 40% 96%;
+    --foreground: 222 47% 11%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 215 25% 15%;
+    --card: 210 40% 98%;
+    --card-foreground: 222 47% 11%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 215 25% 15%;
+    --popover: 214 31% 91%;
+    --popover-foreground: 222 47% 11%;
 
-    --primary: 195 90% 45%;
-    --primary-foreground: 0 0% 100%;
+    /* AppMaster Blue - Professional Brand Color */
+    --primary: 216 19% 26%;
+    --primary-foreground: 210 19% 98%;
+    --primary-hover: 211 100% 45%;
 
-    --secondary: 210 15% 92%;
-    --secondary-foreground: 215 25% 15%;
+    /* Muted Grays for Structure */
+    --secondary: 215 19% 34%;
+    --secondary-foreground: 210 40% 98%;
 
-    --muted: 210 15% 95%;
-    --muted-foreground: 215 15% 50%;
+    --muted: 215 20% 65%;
+    --muted-foreground: 222 47% 11%;
 
-    --accent: 190 85% 55%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 210 40% 98%;
+    --accent-foreground: 215 16% 46%;
 
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 100%;
+    --destructive: 0 72% 50%;
+    --destructive-foreground: 0 85% 97%;
 
-    --border: 214 20% 88%;
-    --input: 214 20% 88%;
-    --ring: 195 90% 45%;
-
-    --success: 145 65% 45%;
+    --success: 142 76% 36%;
     --success-foreground: 0 0% 100%;
 
-    --warning: 40 95% 55%;
-    --warning-foreground: 215 25% 15%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
 
-    --info: 210 85% 55%;
-    --info-foreground: 0 0% 100%;
+    /* Borders & Inputs */
+    --border: 212 26% 83%;
+    --input: 212 26% 83%;
+    --ring: 216 19% 26%;
 
-    --radius: 0.5rem;
+    /* Professional Radius */
+    --radius: 0rem;
 
-    --sidebar-background: 215 30% 10%;
-    --sidebar-foreground: 210 15% 90%;
-    --sidebar-primary: 195 90% 45%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 215 25% 15%;
-    --sidebar-accent-foreground: 210 15% 90%;
-    --sidebar-border: 215 25% 18%;
-    --sidebar-ring: 195 90% 45%;
+    /* Subtle Shadows */
+    --shadow-sm: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
+    --shadow-md: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 2px 4px -1px hsl(0 0% 0% / 0.1);
+    --shadow-lg: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 4px 6px -1px hsl(0 0% 0% / 0.1);
 
-    --chart-1: 195 90% 45%;
-    --chart-2: 190 85% 55%;
-    --chart-3: 185 80% 60%;
-    --chart-4: 210 85% 55%;
-    --chart-5: 220 80% 60%;
+    /* Professional Transitions */
+    --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-base: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-slow: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* Sidebar */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 222 47% 11%;
+    --sidebar-primary: 216 19% 26%;
+    --sidebar-primary-foreground: 210 19% 98%;
+    --sidebar-accent: 215 19% 34%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 212 26% 83%;
+    --sidebar-ring: 216 19% 26%;
+    --chart-1: 217 10% 64%;
+    --chart-2: 215 20% 65%;
+    --chart-3: 215 16% 46%;
+    --chart-4: 219 8% 46%;
+    --chart-5: 215 19% 34%;
+    --sidebar: 210 40% 98%;
+    --font-sans: 'DM Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+    --font-serif: 'Crimson Pro', ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif;
+    --font-mono: 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+    --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
+    --shadow-xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
+    --shadow: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
+    --shadow-xl: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 8px 10px -1px hsl(0 0% 0% / 0.1);
+    --shadow-2xl: 0 1px 3px 0px hsl(0 0% 0% / 0.25);
+    --tracking-normal: 0em;
+    --spacing: 0.25rem;
   }
 
   .dark {
-    --background: 215 30% 8%;
-    --foreground: 210 15% 90%;
+    --background: 222 47% 11%;
+    --foreground: 210 40% 98%;
 
-    --card: 215 28% 12%;
-    --card-foreground: 210 15% 90%;
+    --card: 217 32% 17%;
+    --card-foreground: 210 40% 98%;
 
-    --popover: 215 28% 12%;
-    --popover-foreground: 210 15% 90%;
+    --popover: 215 24% 26%;
+    --popover-foreground: 210 40% 98%;
 
-    --primary: 195 90% 50%;
-    --primary-foreground: 0 0% 100%;
+    --primary: 212 26% 83%;
+    --primary-foreground: 228 84% 4%;
+    --primary-hover: 211 100% 55%;
 
-    --secondary: 215 25% 18%;
-    --secondary-foreground: 210 15% 90%;
+    --secondary: 215 19% 34%;
+    --secondary-foreground: 210 40% 98%;
 
-    --muted: 215 25% 18%;
-    --muted-foreground: 215 15% 60%;
+    --muted: 215 16% 46%;
+    --muted-foreground: 210 40% 98%;
 
-    --accent: 190 85% 55%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 228 84% 4%;
+    --accent-foreground: 215 20% 65%;
 
-    --destructive: 0 75% 55%;
-    --destructive-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 85% 97%;
 
-    --border: 215 25% 18%;
-    --input: 215 25% 18%;
-    --ring: 195 90% 50%;
-
-    --success: 145 65% 50%;
+    --success: 142 76% 36%;
     --success-foreground: 0 0% 100%;
 
-    --warning: 40 95% 60%;
-    --warning-foreground: 215 25% 15%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
 
-    --info: 210 85% 60%;
-    --info-foreground: 0 0% 100%;
+    --border: 215 19% 34%;
+    --input: 215 19% 34%;
+    --ring: 212 26% 83%;
 
-    --sidebar-background: 215 30% 10%;
-    --sidebar-foreground: 210 15% 90%;
-    --sidebar-primary: 195 90% 50%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 215 25% 15%;
-    --sidebar-accent-foreground: 210 15% 90%;
-    --sidebar-border: 215 25% 18%;
-    --sidebar-ring: 195 90% 50%;
+    --shadow-sm: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
+    --shadow-md: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 2px 4px -1px hsl(0 0% 0% / 0.1);
+    --shadow-lg: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 4px 6px -1px hsl(0 0% 0% / 0.1);
 
-    --chart-1: 195 90% 50%;
-    --chart-2: 190 85% 60%;
-    --chart-3: 185 80% 65%;
-    --chart-4: 210 85% 60%;
-    --chart-5: 220 80% 65%;
+    --sidebar-background: 220 13% 11%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 212 26% 83%;
+    --sidebar-primary-foreground: 228 84% 4%;
+    --sidebar-accent: 215 20% 65%;
+    --sidebar-accent-foreground: 228 84% 4%;
+    --sidebar-border: 215 19% 34%;
+    --sidebar-ring: 212 26% 83%;
+    --chart-1: 215 12% 83%;
+    --chart-2: 212 26% 83%;
+    --chart-3: 215 20% 65%;
+    --chart-4: 217 10% 64%;
+    --chart-5: 215 16% 46%;
+    --sidebar: 217 32% 17%;
+    --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
+    --shadow-xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
+    --shadow: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
+    --shadow-xl: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 8px 10px -1px hsl(0 0% 0% / 0.1);
+    --shadow-2xl: 0 1px 3px 0px hsl(0 0% 0% / 0.25);
   }
 }
 
@@ -124,6 +166,78 @@ All colors MUST be HSL.
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans;
+    font-optical-sizing: auto;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 1;
+    overflow-x: hidden;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+  }
+
+  html {
+    overflow-x: hidden;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    scroll-behavior: smooth;
+  }
+
+  #root {
+    width: 100%;
+    min-height: 100vh;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Professional Typography Scale with Proper Weights */
+  h1 {
+    @apply text-3xl font-semibold tracking-tight;
+    letter-spacing: -0.02em;
+  }
+
+  h2 {
+    @apply text-2xl font-semibold tracking-tight;
+    letter-spacing: -0.01em;
+  }
+
+  h3 {
+    @apply text-xl font-semibold tracking-tight;
+    letter-spacing: -0.01em;
+  }
+
+  h4 {
+    @apply text-lg font-medium;
+    letter-spacing: -0.005em;
+  }
+
+  h5 {
+    @apply text-base font-medium;
+  }
+
+  h6 {
+    @apply text-sm font-medium;
+  }
+
+  /* Professional Body Text */
+  p {
+    @apply text-sm leading-relaxed;
+    letter-spacing: 0.01em;
+  }
+
+  /* Crisp Icons */
+  svg {
+    @apply inline-block;
+    shape-rendering: geometricPrecision;
+  }
+
+  /* Form elements */
+  input, textarea, select, button {
+    font-family: inherit;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }

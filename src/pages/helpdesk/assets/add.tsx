@@ -1,0 +1,591 @@
+import { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "sonner";
+import { Loader2, Plus } from "lucide-react";
+import { useAssetSetupConfig } from "@/hooks/useAssetSetupConfig";
+import { cn } from "@/lib/utils";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { format } from "date-fns";
+import { CalendarIcon } from "lucide-react";
+import { AssetPhotoSelector } from "@/components/helpdesk/assets/AssetPhotoSelector";
+const currencies = [{
+  code: "INR",
+  name: "India Rupee",
+  symbol: "₹"
+}, {
+  code: "USD",
+  name: "US Dollar",
+  symbol: "$"
+}, {
+  code: "EUR",
+  name: "Euro",
+  symbol: "€"
+}, {
+  code: "GBP",
+  name: "British Pound",
+  symbol: "£"
+}, {
+  code: "AUD",
+  name: "Australian Dollar",
+  symbol: "A$"
+}, {
+  code: "CAD",
+  name: "Canadian Dollar",
+  symbol: "C$"
+}];
+export default function AddAsset() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const {
+    categories,
+    sites,
+    locations,
+    departments,
+    makes,
+    isLoading: configLoading
+  } = useAssetSetupConfig();
+  const [formData, setFormData] = useState({
+    asset_tag: "",
+    serial_number: "",
+    make_id: "",
+    model: "",
+    purchase_date: null as Date | null,
+    purchased_from: "",
+    cost: "",
+    currency: "INR",
+    description: "",
+    asset_configuration: "",
+    classification_confidential: false,
+    classification_internal: false,
+    classification_public: false,
+    site_id: "",
+    location_id: "",
+    category_id: "",
+    department_id: "",
+    photo_url: null as string | null
+  });
+  const [isAutoFilling, setIsAutoFilling] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+
+  // Filter locations based on selected site
+  const filteredLocations = useMemo(() => {
+    if (!formData.site_id) return locations;
+    return locations.filter(loc => loc.site_id === formData.site_id);
+  }, [locations, formData.site_id]);
+
+  // Clear location if site changes and current location doesn't belong to new site
+  useEffect(() => {
+    if (formData.site_id && formData.location_id) {
+      const locationBelongsToSite = filteredLocations.some(loc => loc.id === formData.location_id);
+      if (!locationBelongsToSite) {
+        setFormData(prev => ({
+          ...prev,
+          location_id: ""
+        }));
+      }
+    }
+  }, [formData.site_id, formData.location_id, filteredLocations]);
+
+  // Auto-fill Asset Tag ID when category is selected or changed
+  useEffect(() => {
+    if (formData.category_id) {
+      handleAutoFill();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.category_id]);
+  const handleAutoFill = async () => {
+    if (!formData.category_id) {
+      toast.error("Please select a category first");
+      return;
+    }
+    setIsAutoFilling(true);
+    try {
+      const {
+        data,
+        error
+      } = await supabase.functions.invoke("get-next-asset-id-by-category", {
+        body: {
+          category_id: formData.category_id
+        }
+      });
+      if (error) throw error;
+      if (data?.needsConfiguration) {
+        toast.error(data.error || "Tag format not configured for this category", {
+          action: {
+            label: "Setup",
+            onClick: () => navigate("/assets/setup/fields-setup")
+          }
+        });
+        return;
+      }
+      if (data?.assetId) {
+        setFormData(prev => ({
+          ...prev,
+          asset_tag: data.assetId
+        }));
+        toast.success("Asset Tag ID generated");
+      }
+    } catch (error) {
+      toast.error("Failed to generate Asset Tag ID");
+    } finally {
+      setIsAutoFilling(false);
+    }
+  };
+  const validateForm = (): string[] => {
+    const errors: string[] = [];
+    if (!formData.category_id) errors.push("Category is required");
+    if (!formData.asset_tag.trim()) errors.push("Asset Tag ID is required");
+    if (!formData.serial_number.trim()) errors.push("Serial Number is required");
+    if (!formData.make_id) errors.push("Make is required");
+    if (!formData.model.trim()) errors.push("Model is required");
+    if (!formData.purchase_date) errors.push("Purchase Date is required");
+    if (!formData.cost) errors.push("Cost is required");
+    if (!formData.site_id) errors.push("Site is required");
+    if (!formData.location_id) errors.push("Location is required");
+    return errors;
+  };
+  const createAsset = useMutation({
+    mutationFn: async () => {
+      const {
+        data: {
+          user
+        }
+      } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      // Fetch both tenant_id from profiles and organisation_id from users
+      const [profileResult, userResult] = await Promise.all([supabase.from("profiles").select("tenant_id").eq("id", user.id).maybeSingle(), supabase.from("users").select("organisation_id").eq("auth_user_id", user.id).maybeSingle()]);
+      const tenantId = profileResult.data?.tenant_id || 1;
+      const organisationId = userResult.data?.organisation_id;
+
+      // Build classification array
+      const classifications: string[] = [];
+      if (formData.classification_confidential) classifications.push("confidential");
+      if (formData.classification_internal) classifications.push("internal");
+      if (formData.classification_public) classifications.push("public");
+
+      // Generate asset_id (required field)
+      const assetId = formData.asset_tag || `AST-${Date.now()}`;
+
+      // @ts-ignore - Complex Supabase type inference issue
+      const {
+        error
+      } = await supabase.from("itam_assets").insert({
+        asset_id: assetId,
+        asset_tag: assetId,
+        name: formData.description || formData.model || "Unnamed Asset",
+        status: "available",
+        category_id: formData.category_id || null,
+        location_id: formData.location_id || null,
+        department_id: formData.department_id || null,
+        make_id: formData.make_id || null,
+        model: formData.model || null,
+        serial_number: formData.serial_number || null,
+        purchase_price: formData.cost ? parseFloat(formData.cost) : null,
+        notes: formData.description || null,
+        tenant_id: tenantId,
+        organisation_id: organisationId,
+        is_active: true,
+        purchase_date: formData.purchase_date ? format(formData.purchase_date, "yyyy-MM-dd") : null,
+        custom_fields: {
+          asset_configuration: formData.asset_configuration,
+          classification: classifications,
+          currency: formData.currency,
+          vendor: formData.purchased_from,
+          photo_url: formData.photo_url,
+          site_id: formData.site_id || null
+        }
+      } as any);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Asset created successfully");
+      queryClient.invalidateQueries({
+        queryKey: ["helpdesk-assets"]
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["assets-overview"]
+      });
+      navigate("/assets/allassets");
+    },
+    onError: (error: Error) => {
+      toast.error("Failed to create asset: " + error.message);
+    }
+  });
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const errors = validateForm();
+    if (errors.length > 0) {
+      setValidationErrors(errors);
+      toast.error(errors[0]);
+      return;
+    }
+    setValidationErrors([]);
+    createAsset.mutate();
+  };
+  const handleCancel = () => {
+    navigate("/assets/allassets");
+  };
+  return <div className="p-4 space-y-4 overflow-hidden">
+      {/* Header */}
+      
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Asset Details */}
+        <Card>
+          <CardHeader className="bg-muted/50 py-2.5">
+            <CardTitle className="text-sm font-medium">Asset Details</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-3">
+              {/* Category - First field */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">
+                  Category <span className="text-destructive">*</span>
+                </Label>
+                <div className="flex gap-1.5">
+                  <Select value={formData.category_id} onValueChange={value => setFormData({
+                  ...formData,
+                  category_id: value
+                })}>
+                    <SelectTrigger className="flex-1 h-8 text-sm">
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {categories.length === 0 ? <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+                          No categories found.{" "}
+                          <Button type="button" variant="link" className="p-0 h-auto text-xs" onClick={() => navigate("/assets/setup?section=categories")}>
+                            Add one
+                          </Button>
+                        </div> : categories.map(cat => <SelectItem key={cat.id} value={cat.id}>
+                            {cat.name}
+                          </SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Button type="button" variant="outline" size="icon" onClick={() => navigate("/assets/setup?section=categories")} title="Add new category" className="h-8 w-8 shrink-0">
+                    <Plus className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* Asset Tag ID with AutoFill */}
+              <div className="space-y-1.5">
+                <Label htmlFor="asset_tag" className="text-xs">
+                  Asset Tag ID <span className="text-destructive">*</span>
+                </Label>
+                <div className="flex gap-2">
+                  <Input id="asset_tag" value={formData.asset_tag} onChange={e => setFormData({
+                  ...formData,
+                  asset_tag: e.target.value
+                })} placeholder="Enter asset tag" className="flex-1 h-8 text-sm" />
+                  <Button type="button" variant="secondary" size="sm" onClick={handleAutoFill} disabled={isAutoFilling || !formData.category_id} className="bg-primary hover:bg-primary/90 text-primary-foreground h-8" title={!formData.category_id ? "Select a category first" : "Auto-generate Asset Tag ID"}>
+                    {isAutoFilling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "AutoFill"}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Serial No */}
+              <div className="space-y-1.5">
+                <Label htmlFor="serial_number" className="text-xs">
+                  Serial No <span className="text-destructive">*</span>
+                </Label>
+                <Input id="serial_number" value={formData.serial_number} onChange={e => setFormData({
+                ...formData,
+                serial_number: e.target.value
+              })} placeholder="Enter serial number" className="h-8 text-sm" />
+              </div>
+
+              {/* Make */}
+              <div className="space-y-1.5">
+                <Label htmlFor="make" className="text-xs">
+                  Make <span className="text-destructive">*</span>
+                </Label>
+                <div className="flex gap-1.5">
+                  <Select value={formData.make_id} onValueChange={value => setFormData({
+                  ...formData,
+                  make_id: value
+                })}>
+                    <SelectTrigger className="flex-1 h-8 text-sm">
+                      <SelectValue placeholder="Select make" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {makes.length === 0 ? <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+                          No makes found.{" "}
+                          <Button type="button" variant="link" className="p-0 h-auto text-xs" onClick={() => navigate("/assets/setup?section=makes")}>
+                            Add one
+                          </Button>
+                        </div> : makes.map(make => <SelectItem key={make.id} value={make.id}>
+                            {make.name}
+                          </SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Button type="button" variant="outline" size="icon" onClick={() => navigate("/assets/setup?section=makes")} title="Add new make" className="h-8 w-8 shrink-0">
+                    <Plus className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* Model */}
+              <div className="space-y-1.5">
+                <Label htmlFor="model" className="text-xs">
+                  Model <span className="text-destructive">*</span>
+                </Label>
+                <Input id="model" value={formData.model} onChange={e => setFormData({
+                ...formData,
+                model: e.target.value
+              })} placeholder="Enter model" className="h-8 text-sm" />
+              </div>
+
+              {/* Purchase Date */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">
+                  Purchase Date <span className="text-destructive">*</span>
+                </Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className={cn("w-full justify-start text-left font-normal h-8 text-sm", !formData.purchase_date && "text-muted-foreground")}>
+                      <CalendarIcon className="mr-2 h-3.5 w-3.5" />
+                      {formData.purchase_date ? format(formData.purchase_date, "PPP") : "Pick a date"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0 z-[200]" align="start">
+                    <Calendar mode="single" selected={formData.purchase_date || undefined} onSelect={date => setFormData({
+                    ...formData,
+                    purchase_date: date || null
+                  })} initialFocus className="pointer-events-auto" />
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              {/* Vendor */}
+              <div className="space-y-1.5">
+                <Label htmlFor="purchased_from" className="text-xs">
+                  Vendor <span className="text-destructive">*</span>
+                </Label>
+                <Input id="purchased_from" value={formData.purchased_from} onChange={e => setFormData({
+                ...formData,
+                purchased_from: e.target.value
+              })} placeholder="Enter vendor name" className="h-8 text-sm" />
+              </div>
+
+              {/* Cost with Currency */}
+              <div className="space-y-1.5">
+                <Label htmlFor="cost" className="text-xs">
+                  Cost <span className="text-destructive">*</span>
+                </Label>
+                <div className="flex gap-1.5">
+                  <Select value={formData.currency} onValueChange={value => setFormData({
+                  ...formData,
+                  currency: value
+                })}>
+                    <SelectTrigger className="w-[100px] h-8 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {currencies.map(curr => <SelectItem key={curr.code} value={curr.code}>
+                          {curr.symbol} {curr.code}
+                        </SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Input id="cost" type="number" value={formData.cost} onChange={e => setFormData({
+                  ...formData,
+                  cost: e.target.value
+                })} placeholder="0.00" className="flex-1 h-8 text-sm" />
+                </div>
+              </div>
+
+              {/* Asset Configuration */}
+              <div className="space-y-1.5">
+                <Label htmlFor="asset_configuration" className="text-xs">
+                  Asset Configuration
+                </Label>
+                <Input id="asset_configuration" value={formData.asset_configuration} onChange={e => setFormData({
+                ...formData,
+                asset_configuration: e.target.value
+              })} placeholder="Enter configuration" className="h-8 text-sm" />
+              </div>
+
+              {/* Description - Full width */}
+              <div className="space-y-1.5 md:col-span-3">
+                <Label htmlFor="description" className="text-xs">
+                  Description
+                </Label>
+                <Textarea id="description" value={formData.description} onChange={e => setFormData({
+                ...formData,
+                description: e.target.value
+              })} placeholder="Enter asset description" rows={2} className="text-sm resize-none" />
+              </div>
+
+              {/* Asset Classification */}
+              <div className="space-y-1.5 md:col-span-3">
+                <Label className="text-xs">Asset Classification</Label>
+                <div className="flex gap-6">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox id="confidential" checked={formData.classification_confidential} onCheckedChange={checked => setFormData({
+                    ...formData,
+                    classification_confidential: !!checked
+                  })} />
+                    <Label htmlFor="confidential" className="font-normal cursor-pointer text-sm">
+                      Confidential
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Checkbox id="internal" checked={formData.classification_internal} onCheckedChange={checked => setFormData({
+                    ...formData,
+                    classification_internal: !!checked
+                  })} />
+                    <Label htmlFor="internal" className="font-normal cursor-pointer text-sm">
+                      Internal
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Checkbox id="public" checked={formData.classification_public} onCheckedChange={checked => setFormData({
+                    ...formData,
+                    classification_public: !!checked
+                  })} />
+                    <Label htmlFor="public" className="font-normal cursor-pointer text-sm">
+                      Public
+                    </Label>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Site, Location and Department */}
+        <Card>
+          <CardHeader className="bg-muted/50 py-2.5">
+            <CardTitle className="text-sm font-medium">Site, Location and Department</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-3">
+              {/* Site */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">
+                  Site <span className="text-destructive">*</span>
+                </Label>
+                <div className="flex gap-1.5">
+                  <Select value={formData.site_id} onValueChange={value => setFormData({
+                  ...formData,
+                  site_id: value
+                })}>
+                    <SelectTrigger className="flex-1 h-8 text-sm">
+                      <SelectValue placeholder="Select site" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sites.length === 0 ? <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+                          No sites found.{" "}
+                          <Button type="button" variant="link" className="p-0 h-auto text-xs" onClick={() => navigate("/assets/setup?section=sites")}>
+                            Add one
+                          </Button>
+                        </div> : sites.map(site => <SelectItem key={site.id} value={site.id}>
+                            {site.name}
+                          </SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Button type="button" variant="outline" size="icon" onClick={() => navigate("/assets/setup?section=sites")} title="Add new site" className="h-8 w-8 shrink-0">
+                    <Plus className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* Location - filtered by site */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">
+                  Location <span className="text-destructive">*</span>
+                </Label>
+                <div className="flex gap-1.5">
+                  <Select value={formData.location_id} onValueChange={value => setFormData({
+                  ...formData,
+                  location_id: value
+                })}>
+                    <SelectTrigger className="flex-1 h-8 text-sm">
+                      <SelectValue placeholder="Select location" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {filteredLocations.length === 0 ? <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+                          {formData.site_id ? "No locations for this site." : "No locations found."}{" "}
+                          <Button type="button" variant="link" className="p-0 h-auto text-xs" onClick={() => navigate("/assets/setup?section=locations")}>
+                            Add one
+                          </Button>
+                        </div> : filteredLocations.map(loc => <SelectItem key={loc.id} value={loc.id}>
+                            {loc.name}
+                          </SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Button type="button" variant="outline" size="icon" onClick={() => navigate("/assets/setup?section=locations")} title="Add new location" className="h-8 w-8 shrink-0">
+                    <Plus className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* Department */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Department</Label>
+                <div className="flex gap-1.5">
+                  <Select value={formData.department_id} onValueChange={value => setFormData({
+                  ...formData,
+                  department_id: value
+                })}>
+                    <SelectTrigger className="flex-1 h-8 text-sm">
+                      <SelectValue placeholder="Select department" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {departments.length === 0 ? <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+                          No departments found.{" "}
+                          <Button type="button" variant="link" className="p-0 h-auto text-xs" onClick={() => navigate("/assets/setup?section=departments")}>
+                            Add one
+                          </Button>
+                        </div> : departments.map(dept => <SelectItem key={dept.id} value={dept.id}>
+                            {dept.name}
+                          </SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Button type="button" variant="outline" size="icon" onClick={() => navigate("/assets/setup?section=departments")} title="Add new department" className="h-8 w-8 shrink-0">
+                    <Plus className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Asset Image */}
+        <Card>
+          <CardHeader className="bg-muted/50 py-2.5">
+            <CardTitle className="text-sm font-medium">Asset Image</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-4">
+            <AssetPhotoSelector selectedUrl={formData.photo_url} onSelect={url => setFormData({
+            ...formData,
+            photo_url: url
+          })} />
+          </CardContent>
+        </Card>
+
+        {/* Actions */}
+        <div className="flex justify-end gap-2 pb-4">
+          <Button type="button" variant="outline" size="sm" onClick={handleCancel} className="min-w-[80px]">
+            Cancel
+          </Button>
+          <Button type="submit" size="sm" disabled={createAsset.isPending} className="min-w-[80px] bg-primary hover:bg-primary/90 text-primary-foreground">
+            {createAsset.isPending ? <>
+                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                Submitting...
+              </> : "Submit"}
+          </Button>
+        </div>
+      </form>
+    </div>;
+}
