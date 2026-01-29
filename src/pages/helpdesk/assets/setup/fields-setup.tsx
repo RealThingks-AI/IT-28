@@ -294,12 +294,15 @@ export default function FieldsSetupPage() {
             {dialogType === "location" && (
               <div className="space-y-2">
                 <Label>Site (Optional)</Label>
-                <Select value={selectedSiteId} onValueChange={setSelectedSiteId}>
+                <Select 
+                  value={selectedSiteId || "__none__"} 
+                  onValueChange={(v) => setSelectedSiteId(v === "__none__" ? "" : v)}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select a site" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">No Site</SelectItem>
+                    <SelectItem value="__none__">No Site</SelectItem>
                     {sites.map((site) => (
                       <SelectItem key={site.id} value={site.id}>
                         {site.name}
