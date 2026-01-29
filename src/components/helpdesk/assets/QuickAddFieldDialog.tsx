@@ -141,12 +141,15 @@ export function QuickAddFieldDialog({
             {fieldType === "location" && sites.length > 0 && (
               <div className="space-y-2">
                 <Label htmlFor="site">Site (Optional)</Label>
-                <Select value={siteId || ""} onValueChange={(v) => setSiteId(v || undefined)}>
+                <Select 
+                  value={siteId || "__none__"} 
+                  onValueChange={(v) => setSiteId(v === "__none__" ? undefined : v)}
+                >
                   <SelectTrigger id="site">
                     <SelectValue placeholder="Select a site" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">No Site</SelectItem>
+                    <SelectItem value="__none__">No Site</SelectItem>
                     {sites.map((site) => (
                       <SelectItem key={site.id} value={site.id}>
                         {site.name}
