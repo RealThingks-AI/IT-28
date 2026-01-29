@@ -18,6 +18,8 @@ import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { CalendarIcon } from "lucide-react";
 import { AssetPhotoSelector } from "@/components/helpdesk/assets/AssetPhotoSelector";
+import { QuickAddFieldDialog, FieldType } from "@/components/helpdesk/assets/QuickAddFieldDialog";
+
 const currencies = [{
   code: "INR",
   name: "India Rupee",
@@ -43,6 +45,7 @@ const currencies = [{
   name: "Canadian Dollar",
   symbol: "C$"
 }];
+
 export default function AddAsset() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -54,6 +57,7 @@ export default function AddAsset() {
     makes,
     isLoading: configLoading
   } = useAssetSetupConfig();
+
   const [formData, setFormData] = useState({
     asset_tag: "",
     serial_number: "",
@@ -74,13 +78,19 @@ export default function AddAsset() {
     department_id: "",
     photo_url: null as string | null
   });
+
   const [isAutoFilling, setIsAutoFilling] = useState(false);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
-  // Filter locations based on selected site
+  // Quick Add Dialog state
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [quickAddFieldType, setQuickAddFieldType] = useState<FieldType>("site");
+
+  // Filter locations based on selected site - include locations with null site_id
   const filteredLocations = useMemo(() => {
     if (!formData.site_id) return locations;
-    return locations.filter(loc => loc.site_id === formData.site_id);
+    // Show locations that match the selected site OR have no site assigned
+    return locations.filter(loc => loc.site_id === formData.site_id || loc.site_id === null);
   }, [locations, formData.site_id]);
 
   // Clear location if site changes and current location doesn't belong to new site
@@ -103,6 +113,7 @@ export default function AddAsset() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.category_id]);
+
   const handleAutoFill = async () => {
     if (!formData.category_id) {
       toast.error("Please select a category first");
@@ -110,13 +121,8 @@ export default function AddAsset() {
     }
     setIsAutoFilling(true);
     try {
-      const {
-        data,
-        error
-      } = await supabase.functions.invoke("get-next-asset-id-by-category", {
-        body: {
-          category_id: formData.category_id
-        }
+      const { data, error } = await supabase.functions.invoke("get-next-asset-id-by-category", {
+        body: { category_id: formData.category_id }
       });
       if (error) throw error;
       if (data?.needsConfiguration) {
@@ -141,6 +147,7 @@ export default function AddAsset() {
       setIsAutoFilling(false);
     }
   };
+
   const validateForm = (): string[] => {
     const errors: string[] = [];
     if (!formData.category_id) errors.push("Category is required");
@@ -154,33 +161,28 @@ export default function AddAsset() {
     if (!formData.location_id) errors.push("Location is required");
     return errors;
   };
+
   const createAsset = useMutation({
     mutationFn: async () => {
-      const {
-        data: {
-          user
-        }
-      } = await supabase.auth.getUser();
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
-      // Fetch both tenant_id from profiles and organisation_id from users
-      const [profileResult, userResult] = await Promise.all([supabase.from("profiles").select("tenant_id").eq("id", user.id).maybeSingle(), supabase.from("users").select("organisation_id").eq("auth_user_id", user.id).maybeSingle()]);
+      const [profileResult, userResult] = await Promise.all([
+        supabase.from("profiles").select("tenant_id").eq("id", user.id).maybeSingle(),
+        supabase.from("users").select("organisation_id").eq("auth_user_id", user.id).maybeSingle()
+      ]);
       const tenantId = profileResult.data?.tenant_id || 1;
       const organisationId = userResult.data?.organisation_id;
 
-      // Build classification array
       const classifications: string[] = [];
       if (formData.classification_confidential) classifications.push("confidential");
       if (formData.classification_internal) classifications.push("internal");
       if (formData.classification_public) classifications.push("public");
 
-      // Generate asset_id (required field)
       const assetId = formData.asset_tag || `AST-${Date.now()}`;
 
       // @ts-ignore - Complex Supabase type inference issue
-      const {
-        error
-      } = await supabase.from("itam_assets").insert({
+      const { error } = await supabase.from("itam_assets").insert({
         asset_id: assetId,
         asset_tag: assetId,
         name: formData.description || formData.model || "Unnamed Asset",
@@ -210,18 +212,15 @@ export default function AddAsset() {
     },
     onSuccess: () => {
       toast.success("Asset created successfully");
-      queryClient.invalidateQueries({
-        queryKey: ["helpdesk-assets"]
-      });
-      queryClient.invalidateQueries({
-        queryKey: ["assets-overview"]
-      });
+      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets"] });
+      queryClient.invalidateQueries({ queryKey: ["assets-overview"] });
       navigate("/assets/allassets");
     },
     onError: (error: Error) => {
       toast.error("Failed to create asset: " + error.message);
     }
   });
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const errors = validateForm();
@@ -233,13 +232,39 @@ export default function AddAsset() {
     setValidationErrors([]);
     createAsset.mutate();
   };
+
   const handleCancel = () => {
     navigate("/assets/allassets");
   };
-  return <div className="p-4 space-y-4 overflow-hidden">
-      {/* Header */}
-      
 
+  const openQuickAddDialog = (fieldType: FieldType) => {
+    setQuickAddFieldType(fieldType);
+    setQuickAddOpen(true);
+  };
+
+  const handleQuickAddSuccess = (id: string, name: string) => {
+    // Auto-select the newly created item
+    switch (quickAddFieldType) {
+      case "site":
+        setFormData(prev => ({ ...prev, site_id: id }));
+        break;
+      case "location":
+        setFormData(prev => ({ ...prev, location_id: id }));
+        break;
+      case "category":
+        setFormData(prev => ({ ...prev, category_id: id }));
+        break;
+      case "department":
+        setFormData(prev => ({ ...prev, department_id: id }));
+        break;
+      case "make":
+        setFormData(prev => ({ ...prev, make_id: id }));
+        break;
+    }
+  };
+
+  return (
+    <div className="p-4 space-y-4 overflow-hidden">
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* Asset Details */}
         <Card>
@@ -254,25 +279,26 @@ export default function AddAsset() {
                   Category <span className="text-destructive">*</span>
                 </Label>
                 <div className="flex gap-1.5">
-                  <Select value={formData.category_id} onValueChange={value => setFormData({
-                  ...formData,
-                  category_id: value
-                })}>
+                  <Select value={formData.category_id} onValueChange={value => setFormData({ ...formData, category_id: value })}>
                     <SelectTrigger className="flex-1 h-8 text-sm">
                       <SelectValue placeholder="Select category" />
                     </SelectTrigger>
                     <SelectContent>
-                      {categories.length === 0 ? <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+                      {categories.length === 0 ? (
+                        <div className="px-2 py-3 text-xs text-muted-foreground text-center">
                           No categories found.{" "}
-                          <Button type="button" variant="link" className="p-0 h-auto text-xs" onClick={() => navigate("/assets/setup?section=categories")}>
+                          <Button type="button" variant="link" className="p-0 h-auto text-xs" onClick={() => openQuickAddDialog("category")}>
                             Add one
                           </Button>
-                        </div> : categories.map(cat => <SelectItem key={cat.id} value={cat.id}>
-                            {cat.name}
-                          </SelectItem>)}
+                        </div>
+                      ) : (
+                        categories.map(cat => (
+                          <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                        ))
+                      )}
                     </SelectContent>
                   </Select>
-                  <Button type="button" variant="outline" size="icon" onClick={() => navigate("/assets/setup?section=categories")} title="Add new category" className="h-8 w-8 shrink-0">
+                  <Button type="button" variant="outline" size="icon" onClick={() => openQuickAddDialog("category")} title="Add new category" className="h-8 w-8 shrink-0">
                     <Plus className="h-3.5 w-3.5" />
                   </Button>
                 </div>
@@ -284,10 +310,7 @@ export default function AddAsset() {
                   Asset Tag ID <span className="text-destructive">*</span>
                 </Label>
                 <div className="flex gap-2">
-                  <Input id="asset_tag" value={formData.asset_tag} onChange={e => setFormData({
-                  ...formData,
-                  asset_tag: e.target.value
-                })} placeholder="Enter asset tag" className="flex-1 h-8 text-sm" />
+                  <Input id="asset_tag" value={formData.asset_tag} onChange={e => setFormData({ ...formData, asset_tag: e.target.value })} placeholder="Enter asset tag" className="flex-1 h-8 text-sm" />
                   <Button type="button" variant="secondary" size="sm" onClick={handleAutoFill} disabled={isAutoFilling || !formData.category_id} className="bg-primary hover:bg-primary/90 text-primary-foreground h-8" title={!formData.category_id ? "Select a category first" : "Auto-generate Asset Tag ID"}>
                     {isAutoFilling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "AutoFill"}
                   </Button>
@@ -299,10 +322,7 @@ export default function AddAsset() {
                 <Label htmlFor="serial_number" className="text-xs">
                   Serial No <span className="text-destructive">*</span>
                 </Label>
-                <Input id="serial_number" value={formData.serial_number} onChange={e => setFormData({
-                ...formData,
-                serial_number: e.target.value
-              })} placeholder="Enter serial number" className="h-8 text-sm" />
+                <Input id="serial_number" value={formData.serial_number} onChange={e => setFormData({ ...formData, serial_number: e.target.value })} placeholder="Enter serial number" className="h-8 text-sm" />
               </div>
 
               {/* Make */}
@@ -311,25 +331,26 @@ export default function AddAsset() {
                   Make <span className="text-destructive">*</span>
                 </Label>
                 <div className="flex gap-1.5">
-                  <Select value={formData.make_id} onValueChange={value => setFormData({
-                  ...formData,
-                  make_id: value
-                })}>
+                  <Select value={formData.make_id} onValueChange={value => setFormData({ ...formData, make_id: value })}>
                     <SelectTrigger className="flex-1 h-8 text-sm">
                       <SelectValue placeholder="Select make" />
                     </SelectTrigger>
                     <SelectContent>
-                      {makes.length === 0 ? <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+                      {makes.length === 0 ? (
+                        <div className="px-2 py-3 text-xs text-muted-foreground text-center">
                           No makes found.{" "}
-                          <Button type="button" variant="link" className="p-0 h-auto text-xs" onClick={() => navigate("/assets/setup?section=makes")}>
+                          <Button type="button" variant="link" className="p-0 h-auto text-xs" onClick={() => openQuickAddDialog("make")}>
                             Add one
                           </Button>
-                        </div> : makes.map(make => <SelectItem key={make.id} value={make.id}>
-                            {make.name}
-                          </SelectItem>)}
+                        </div>
+                      ) : (
+                        makes.map(make => (
+                          <SelectItem key={make.id} value={make.id}>{make.name}</SelectItem>
+                        ))
+                      )}
                     </SelectContent>
                   </Select>
-                  <Button type="button" variant="outline" size="icon" onClick={() => navigate("/assets/setup?section=makes")} title="Add new make" className="h-8 w-8 shrink-0">
+                  <Button type="button" variant="outline" size="icon" onClick={() => openQuickAddDialog("make")} title="Add new make" className="h-8 w-8 shrink-0">
                     <Plus className="h-3.5 w-3.5" />
                   </Button>
                 </div>
@@ -340,10 +361,7 @@ export default function AddAsset() {
                 <Label htmlFor="model" className="text-xs">
                   Model <span className="text-destructive">*</span>
                 </Label>
-                <Input id="model" value={formData.model} onChange={e => setFormData({
-                ...formData,
-                model: e.target.value
-              })} placeholder="Enter model" className="h-8 text-sm" />
+                <Input id="model" value={formData.model} onChange={e => setFormData({ ...formData, model: e.target.value })} placeholder="Enter model" className="h-8 text-sm" />
               </div>
 
               {/* Purchase Date */}
@@ -359,10 +377,7 @@ export default function AddAsset() {
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0 z-[200]" align="start">
-                    <Calendar mode="single" selected={formData.purchase_date || undefined} onSelect={date => setFormData({
-                    ...formData,
-                    purchase_date: date || null
-                  })} initialFocus className="pointer-events-auto" />
+                    <Calendar mode="single" selected={formData.purchase_date || undefined} onSelect={date => setFormData({ ...formData, purchase_date: date || null })} initialFocus className="pointer-events-auto" />
                   </PopoverContent>
                 </Popover>
               </div>
@@ -372,10 +387,7 @@ export default function AddAsset() {
                 <Label htmlFor="purchased_from" className="text-xs">
                   Vendor <span className="text-destructive">*</span>
                 </Label>
-                <Input id="purchased_from" value={formData.purchased_from} onChange={e => setFormData({
-                ...formData,
-                purchased_from: e.target.value
-              })} placeholder="Enter vendor name" className="h-8 text-sm" />
+                <Input id="purchased_from" value={formData.purchased_from} onChange={e => setFormData({ ...formData, purchased_from: e.target.value })} placeholder="Enter vendor name" className="h-8 text-sm" />
               </div>
 
               {/* Cost with Currency */}
@@ -384,23 +396,19 @@ export default function AddAsset() {
                   Cost <span className="text-destructive">*</span>
                 </Label>
                 <div className="flex gap-1.5">
-                  <Select value={formData.currency} onValueChange={value => setFormData({
-                  ...formData,
-                  currency: value
-                })}>
+                  <Select value={formData.currency} onValueChange={value => setFormData({ ...formData, currency: value })}>
                     <SelectTrigger className="w-[100px] h-8 text-sm">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {currencies.map(curr => <SelectItem key={curr.code} value={curr.code}>
+                      {currencies.map(curr => (
+                        <SelectItem key={curr.code} value={curr.code}>
                           {curr.symbol} {curr.code}
-                        </SelectItem>)}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
-                  <Input id="cost" type="number" value={formData.cost} onChange={e => setFormData({
-                  ...formData,
-                  cost: e.target.value
-                })} placeholder="0.00" className="flex-1 h-8 text-sm" />
+                  <Input id="cost" type="number" value={formData.cost} onChange={e => setFormData({ ...formData, cost: e.target.value })} placeholder="0.00" className="flex-1 h-8 text-sm" />
                 </div>
               </div>
 
@@ -409,10 +417,7 @@ export default function AddAsset() {
                 <Label htmlFor="asset_configuration" className="text-xs">
                   Asset Configuration
                 </Label>
-                <Input id="asset_configuration" value={formData.asset_configuration} onChange={e => setFormData({
-                ...formData,
-                asset_configuration: e.target.value
-              })} placeholder="Enter configuration" className="h-8 text-sm" />
+                <Input id="asset_configuration" value={formData.asset_configuration} onChange={e => setFormData({ ...formData, asset_configuration: e.target.value })} placeholder="Enter configuration" className="h-8 text-sm" />
               </div>
 
               {/* Description - Full width */}
@@ -420,10 +425,7 @@ export default function AddAsset() {
                 <Label htmlFor="description" className="text-xs">
                   Description
                 </Label>
-                <Textarea id="description" value={formData.description} onChange={e => setFormData({
-                ...formData,
-                description: e.target.value
-              })} placeholder="Enter asset description" rows={2} className="text-sm resize-none" />
+                <Textarea id="description" value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} placeholder="Enter asset description" rows={2} className="text-sm resize-none" />
               </div>
 
               {/* Asset Classification */}
@@ -431,28 +433,19 @@ export default function AddAsset() {
                 <Label className="text-xs">Asset Classification</Label>
                 <div className="flex gap-6">
                   <div className="flex items-center space-x-2">
-                    <Checkbox id="confidential" checked={formData.classification_confidential} onCheckedChange={checked => setFormData({
-                    ...formData,
-                    classification_confidential: !!checked
-                  })} />
+                    <Checkbox id="confidential" checked={formData.classification_confidential} onCheckedChange={checked => setFormData({ ...formData, classification_confidential: !!checked })} />
                     <Label htmlFor="confidential" className="font-normal cursor-pointer text-sm">
                       Confidential
                     </Label>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <Checkbox id="internal" checked={formData.classification_internal} onCheckedChange={checked => setFormData({
-                    ...formData,
-                    classification_internal: !!checked
-                  })} />
+                    <Checkbox id="internal" checked={formData.classification_internal} onCheckedChange={checked => setFormData({ ...formData, classification_internal: !!checked })} />
                     <Label htmlFor="internal" className="font-normal cursor-pointer text-sm">
                       Internal
                     </Label>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <Checkbox id="public" checked={formData.classification_public} onCheckedChange={checked => setFormData({
-                    ...formData,
-                    classification_public: !!checked
-                  })} />
+                    <Checkbox id="public" checked={formData.classification_public} onCheckedChange={checked => setFormData({ ...formData, classification_public: !!checked })} />
                     <Label htmlFor="public" className="font-normal cursor-pointer text-sm">
                       Public
                     </Label>
@@ -476,25 +469,26 @@ export default function AddAsset() {
                   Site <span className="text-destructive">*</span>
                 </Label>
                 <div className="flex gap-1.5">
-                  <Select value={formData.site_id} onValueChange={value => setFormData({
-                  ...formData,
-                  site_id: value
-                })}>
+                  <Select value={formData.site_id} onValueChange={value => setFormData({ ...formData, site_id: value })}>
                     <SelectTrigger className="flex-1 h-8 text-sm">
                       <SelectValue placeholder="Select site" />
                     </SelectTrigger>
                     <SelectContent>
-                      {sites.length === 0 ? <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+                      {sites.length === 0 ? (
+                        <div className="px-2 py-3 text-xs text-muted-foreground text-center">
                           No sites found.{" "}
-                          <Button type="button" variant="link" className="p-0 h-auto text-xs" onClick={() => navigate("/assets/setup?section=sites")}>
+                          <Button type="button" variant="link" className="p-0 h-auto text-xs" onClick={() => openQuickAddDialog("site")}>
                             Add one
                           </Button>
-                        </div> : sites.map(site => <SelectItem key={site.id} value={site.id}>
-                            {site.name}
-                          </SelectItem>)}
+                        </div>
+                      ) : (
+                        sites.map(site => (
+                          <SelectItem key={site.id} value={site.id}>{site.name}</SelectItem>
+                        ))
+                      )}
                     </SelectContent>
                   </Select>
-                  <Button type="button" variant="outline" size="icon" onClick={() => navigate("/assets/setup?section=sites")} title="Add new site" className="h-8 w-8 shrink-0">
+                  <Button type="button" variant="outline" size="icon" onClick={() => openQuickAddDialog("site")} title="Add new site" className="h-8 w-8 shrink-0">
                     <Plus className="h-3.5 w-3.5" />
                   </Button>
                 </div>
@@ -506,25 +500,26 @@ export default function AddAsset() {
                   Location <span className="text-destructive">*</span>
                 </Label>
                 <div className="flex gap-1.5">
-                  <Select value={formData.location_id} onValueChange={value => setFormData({
-                  ...formData,
-                  location_id: value
-                })}>
+                  <Select value={formData.location_id} onValueChange={value => setFormData({ ...formData, location_id: value })}>
                     <SelectTrigger className="flex-1 h-8 text-sm">
                       <SelectValue placeholder="Select location" />
                     </SelectTrigger>
                     <SelectContent>
-                      {filteredLocations.length === 0 ? <div className="px-2 py-3 text-xs text-muted-foreground text-center">
-                          {formData.site_id ? "No locations for this site." : "No locations found."}{" "}
-                          <Button type="button" variant="link" className="p-0 h-auto text-xs" onClick={() => navigate("/assets/setup?section=locations")}>
+                      {filteredLocations.length === 0 ? (
+                        <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+                          No locations found.{" "}
+                          <Button type="button" variant="link" className="p-0 h-auto text-xs" onClick={() => openQuickAddDialog("location")}>
                             Add one
                           </Button>
-                        </div> : filteredLocations.map(loc => <SelectItem key={loc.id} value={loc.id}>
-                            {loc.name}
-                          </SelectItem>)}
+                        </div>
+                      ) : (
+                        filteredLocations.map(loc => (
+                          <SelectItem key={loc.id} value={loc.id}>{loc.name}</SelectItem>
+                        ))
+                      )}
                     </SelectContent>
                   </Select>
-                  <Button type="button" variant="outline" size="icon" onClick={() => navigate("/assets/setup?section=locations")} title="Add new location" className="h-8 w-8 shrink-0">
+                  <Button type="button" variant="outline" size="icon" onClick={() => openQuickAddDialog("location")} title="Add new location" className="h-8 w-8 shrink-0">
                     <Plus className="h-3.5 w-3.5" />
                   </Button>
                 </div>
@@ -534,25 +529,26 @@ export default function AddAsset() {
               <div className="space-y-1.5">
                 <Label className="text-xs">Department</Label>
                 <div className="flex gap-1.5">
-                  <Select value={formData.department_id} onValueChange={value => setFormData({
-                  ...formData,
-                  department_id: value
-                })}>
+                  <Select value={formData.department_id} onValueChange={value => setFormData({ ...formData, department_id: value })}>
                     <SelectTrigger className="flex-1 h-8 text-sm">
                       <SelectValue placeholder="Select department" />
                     </SelectTrigger>
                     <SelectContent>
-                      {departments.length === 0 ? <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+                      {departments.length === 0 ? (
+                        <div className="px-2 py-3 text-xs text-muted-foreground text-center">
                           No departments found.{" "}
-                          <Button type="button" variant="link" className="p-0 h-auto text-xs" onClick={() => navigate("/assets/setup?section=departments")}>
+                          <Button type="button" variant="link" className="p-0 h-auto text-xs" onClick={() => openQuickAddDialog("department")}>
                             Add one
                           </Button>
-                        </div> : departments.map(dept => <SelectItem key={dept.id} value={dept.id}>
-                            {dept.name}
-                          </SelectItem>)}
+                        </div>
+                      ) : (
+                        departments.map(dept => (
+                          <SelectItem key={dept.id} value={dept.id}>{dept.name}</SelectItem>
+                        ))
+                      )}
                     </SelectContent>
                   </Select>
-                  <Button type="button" variant="outline" size="icon" onClick={() => navigate("/assets/setup?section=departments")} title="Add new department" className="h-8 w-8 shrink-0">
+                  <Button type="button" variant="outline" size="icon" onClick={() => openQuickAddDialog("department")} title="Add new department" className="h-8 w-8 shrink-0">
                     <Plus className="h-3.5 w-3.5" />
                   </Button>
                 </div>
@@ -567,10 +563,7 @@ export default function AddAsset() {
             <CardTitle className="text-sm font-medium">Asset Image</CardTitle>
           </CardHeader>
           <CardContent className="pt-4">
-            <AssetPhotoSelector selectedUrl={formData.photo_url} onSelect={url => setFormData({
-            ...formData,
-            photo_url: url
-          })} />
+            <AssetPhotoSelector selectedUrl={formData.photo_url} onSelect={url => setFormData({ ...formData, photo_url: url })} />
           </CardContent>
         </Card>
 
@@ -580,12 +573,25 @@ export default function AddAsset() {
             Cancel
           </Button>
           <Button type="submit" size="sm" disabled={createAsset.isPending} className="min-w-[80px] bg-primary hover:bg-primary/90 text-primary-foreground">
-            {createAsset.isPending ? <>
+            {createAsset.isPending ? (
+              <>
                 <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
                 Submitting...
-              </> : "Submit"}
+              </>
+            ) : "Submit"}
           </Button>
         </div>
       </form>
-    </div>;
+
+      {/* Quick Add Dialog */}
+      <QuickAddFieldDialog
+        open={quickAddOpen}
+        onOpenChange={setQuickAddOpen}
+        fieldType={quickAddFieldType}
+        onSuccess={handleQuickAddSuccess}
+        selectedSiteId={formData.site_id}
+        sites={sites}
+      />
+    </div>
+  );
 }

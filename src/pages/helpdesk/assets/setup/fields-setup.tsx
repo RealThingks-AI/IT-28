@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { BackButton } from "@/components/BackButton";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Pencil, Trash2, Building2, MapPin, FolderTree, Briefcase, Package, Loader2, Tag } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -17,6 +19,7 @@ import { TagFormatTab } from "@/components/helpdesk/assets/TagFormatTab";
 
 export default function FieldsSetupPage() {
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState("sites");
   const { sites, locations, categories, departments, makes } = useAssetSetupConfig();
 
@@ -26,11 +29,31 @@ export default function FieldsSetupPage() {
   const [dialogMode, setDialogMode] = useState<"add" | "edit">("add");
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [inputValue, setInputValue] = useState("");
+  const [selectedSiteId, setSelectedSiteId] = useState<string>("");
+
+  // Handle query parameter for tab switching
+  useEffect(() => {
+    const section = searchParams.get("section");
+    if (section) {
+      const tabMapping: Record<string, string> = {
+        sites: "sites",
+        locations: "locations",
+        categories: "categories",
+        departments: "departments",
+        makes: "makes",
+        tagformat: "tagformat",
+      };
+      if (tabMapping[section]) {
+        setActiveTab(tabMapping[section]);
+      }
+    }
+  }, [searchParams]);
 
   const openAddDialog = (type: string) => {
     setDialogType(type);
     setDialogMode("add");
     setInputValue("");
+    setSelectedSiteId("");
     setDialogOpen(true);
   };
 
@@ -39,6 +62,7 @@ export default function FieldsSetupPage() {
     setDialogMode("edit");
     setSelectedItem(item);
     setInputValue(item.name);
+    setSelectedSiteId(item.site_id || "");
     setDialogOpen(true);
   };
 
@@ -67,15 +91,29 @@ export default function FieldsSetupPage() {
       const tableName = getTableName(dialogType);
       
       if (dialogMode === "add") {
-        const { error } = await supabase.from(tableName as any).insert({
+        const insertData: Record<string, unknown> = {
           name: inputValue.trim(),
           organisation_id: userData?.organisation_id,
-        });
+        };
+        
+        // Add site_id for locations
+        if (dialogType === "location" && selectedSiteId) {
+          insertData.site_id = selectedSiteId;
+        }
+        
+        const { error } = await supabase.from(tableName as any).insert(insertData);
         if (error) throw error;
       } else {
+        const updateData: Record<string, unknown> = { name: inputValue.trim() };
+        
+        // Update site_id for locations
+        if (dialogType === "location") {
+          updateData.site_id = selectedSiteId || null;
+        }
+        
         const { error } = await supabase
           .from(tableName as any)
-          .update({ name: inputValue.trim() })
+          .update(updateData)
           .eq("id", selectedItem.id);
         if (error) throw error;
       }
@@ -96,7 +134,7 @@ export default function FieldsSetupPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async ({ type, id }: { type: string; id: number }) => {
+    mutationFn: async ({ type, id }: { type: string; id: string }) => {
       const tableName = getTableName(type);
       const { error } = await supabase.from(tableName as any).delete().eq("id", id);
       if (error) throw error;
@@ -119,6 +157,7 @@ export default function FieldsSetupPage() {
       <TableHeader>
         <TableRow>
           <TableHead>NAME</TableHead>
+          {type === "location" && <TableHead>SITE</TableHead>}
           <TableHead>STATUS</TableHead>
           <TableHead className="text-right">ACTIONS</TableHead>
         </TableRow>
@@ -127,6 +166,15 @@ export default function FieldsSetupPage() {
         {items.map((item) => (
           <TableRow key={item.id}>
             <TableCell className="font-medium">{item.name}</TableCell>
+            {type === "location" && (
+              <TableCell>
+                {item.site_id ? (
+                  sites.find(s => s.id === item.site_id)?.name || "-"
+                ) : (
+                  <span className="text-muted-foreground">-</span>
+                )}
+              </TableCell>
+            )}
             <TableCell><Badge variant="secondary">Active</Badge></TableCell>
             <TableCell className="text-right">
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditDialog(type, item)}>
@@ -178,7 +226,7 @@ export default function FieldsSetupPage() {
               <CardHeader className="flex flex-row items-center justify-between pb-3">
                 <div>
                   <CardTitle className="text-base flex items-center gap-2"><MapPin className="h-4 w-4" />Locations</CardTitle>
-                  <CardDescription className="text-xs">Manage locations</CardDescription>
+                  <CardDescription className="text-xs">Manage locations and link them to sites</CardDescription>
                 </div>
                 <Button size="sm" onClick={() => openAddDialog("location")}><Plus className="h-3 w-3 mr-2" />Add Location</Button>
               </CardHeader>
@@ -241,6 +289,29 @@ export default function FieldsSetupPage() {
               <Label>Name</Label>
               <Input value={inputValue} onChange={(e) => setInputValue(e.target.value)} placeholder={`Enter ${dialogType} name`} />
             </div>
+            
+            {/* Site selector for locations */}
+            {dialogType === "location" && (
+              <div className="space-y-2">
+                <Label>Site (Optional)</Label>
+                <Select value={selectedSiteId} onValueChange={setSelectedSiteId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a site" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">No Site</SelectItem>
+                    {sites.map((site) => (
+                      <SelectItem key={site.id} value={site.id}>
+                        {site.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Link this location to a site. Locations without a site will be available for all sites.
+                </p>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
