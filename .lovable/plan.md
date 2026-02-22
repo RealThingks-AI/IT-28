@@ -1,26 +1,43 @@
 
 
-# Fix: Remove Page-Level Scrollbar
+# Fix: Category/Setup Item Delete Foreign Key Error
 
-## Root Cause
-The page-level scrollbar comes from `html` and `body` elements allowing vertical overflow. In `src/index.css`:
-- `html` only has `overflow-x: hidden` (line 182) -- `overflow-y` defaults to `auto`, creating the vertical scrollbar
-- `body` only has `overflow-x: hidden` (line 175) -- same issue
-- `#root` has `min-height: 100vh` (line 191) which can push content taller than viewport
+## Problem
+Deleting a category (or any setup item like site, location, department, make) fails with:
+> "update or delete on table 'itam_categories' violates foreign key constraint 'itam_assets_category_id_fkey' on table 'itam_assets'"
 
-The layout already uses `h-screen overflow-hidden` but the browser still shows a scrollbar on `html`/`body` because those elements allow it.
+This happens because the delete operation uses a hard `DELETE` SQL statement, but assets reference these items via foreign keys.
+
+## Solution
+Replace hard delete with **soft delete** (set `is_active = false`) for all setup items. This is consistent with how `itam_categories`, `itam_sites`, `itam_locations`, `itam_departments`, and `itam_makes` tables already have an `is_active` column. The existing queries already filter by `is_active = true`, so deactivated items will automatically stop appearing in dropdowns.
 
 ## Changes
 
-### `src/index.css`
+### File: `src/pages/helpdesk/assets/advanced/index.tsx`
 
-1. **`body` (line 175)**: Change `overflow-x: hidden` to `overflow: hidden`
-2. **`html` (line 182)**: Change `overflow-x: hidden` to `overflow: hidden`
-3. **`#root` (line 191)**: Change `min-height: 100vh` to `height: 100vh` and add `overflow: hidden`
+**1. Update `deleteMutation` (line ~326-346)**
+- Replace `.delete().eq("id", id)` with `.update({ is_active: false }).eq("id", id)`
+- Update success message to "Deactivated successfully"
 
-This ensures no page-level scrollbar can appear. The layout's flexbox structure and the table's `overflow-auto` remain the only scroll source.
+**2. Update delete confirmation dialog text**
+- Change wording from "delete" to "deactivate" to make the action clear to users
+- Explain that the item will be hidden but not permanently removed
 
-## Result
-- Zero page-level scrollbars
-- Only the table body inside AssetsList scrolls
-- All other pages continue working since they render inside the layout's `overflow-hidden` container
+**3. Update delete button tooltip/label**
+- Optionally change the trash icon action label to clarify it deactivates rather than deletes
+
+## Technical Detail
+
+```typescript
+// Before (hard delete - causes FK error):
+const { error } = await supabase.from(tableName).delete().eq("id", id);
+
+// After (soft delete - safe):
+const { error } = await supabase
+  .from(tableName)
+  .update({ is_active: false, updated_at: new Date().toISOString() })
+  .eq("id", id);
+```
+
+Since `useAssetSetupConfig` already filters with `.eq("is_active", true)`, deactivated items will automatically disappear from all dropdowns and lists without any additional code changes.
+
