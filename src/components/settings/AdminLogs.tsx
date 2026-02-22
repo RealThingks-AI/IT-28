@@ -306,7 +306,7 @@ export function AdminLogs() {
     <>
       <SettingsCard
         title="Activity & Audit Logs"
-        description="View detailed activity logs and audit trail for your organization"
+        description="View detailed activity logs and audit trail for your company"
         icon={ScrollText}
         headerAction={
           <div className="flex gap-2">

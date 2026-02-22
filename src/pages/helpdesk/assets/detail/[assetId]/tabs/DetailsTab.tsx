@@ -26,21 +26,13 @@ export const DetailsTab = ({ asset }: DetailsTabProps) => {
     <Card className="h-full">
       <CardContent className="p-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1">
-          {/* Basic Info Section */}
+          {/* Basic Info Section - only fields NOT in header */}
           <div className="col-span-2 mb-1">
             <h3 className="text-sm font-semibold">Basic Information</h3>
           </div>
           <div className="flex justify-between text-sm py-0.5">
             <span className="text-muted-foreground">Serial Number</span>
             <span className="font-medium">{asset.serial_number || '—'}</span>
-          </div>
-          <div className="flex justify-between text-sm py-0.5">
-            <span className="text-muted-foreground">Model</span>
-            <span className="font-medium">{asset.model || '—'}</span>
-          </div>
-          <div className="flex justify-between text-sm py-0.5">
-            <span className="text-muted-foreground">Make</span>
-            <span className="font-medium">{asset.make?.name || '—'}</span>
           </div>
           <div className="flex justify-between text-sm py-0.5">
             <span className="text-muted-foreground">Vendor</span>
@@ -52,21 +44,9 @@ export const DetailsTab = ({ asset }: DetailsTabProps) => {
             </span>
           </div>
 
-          {/* Location Section */}
+          {/* Location & Assignment Section */}
           <div className="col-span-2 mt-2 mb-1">
             <h3 className="text-sm font-semibold">Location & Assignment</h3>
-          </div>
-          <div className="flex justify-between text-sm py-0.5">
-            <span className="text-muted-foreground">Category</span>
-            <span>{asset.category?.name || '—'}</span>
-          </div>
-          <div className="flex justify-between text-sm py-0.5">
-            <span className="text-muted-foreground">Department</span>
-            <span>{asset.department?.name || '—'}</span>
-          </div>
-          <div className="flex justify-between text-sm py-0.5">
-            <span className="text-muted-foreground">Location</span>
-            <span>{asset.location?.name || '—'}</span>
           </div>
           <div className="flex justify-between text-sm py-0.5">
             <span className="text-muted-foreground">Site</span>
@@ -91,23 +71,9 @@ export const DetailsTab = ({ asset }: DetailsTabProps) => {
             </span>
           </div>
 
-          {/* Financial Section */}
+          {/* Financial Section - only Current Value (Purchase Date/Price already in header) */}
           <div className="col-span-2 mt-2 mb-1">
             <h3 className="text-sm font-semibold">Financial</h3>
-          </div>
-          <div className="flex justify-between text-sm py-0.5">
-            <span className="text-muted-foreground">Purchase Date</span>
-            <span>{asset.purchase_date ? format(new Date(asset.purchase_date), "dd/MM/yyyy") : '—'}</span>
-          </div>
-          <div className="flex justify-between text-sm py-0.5">
-            <span className="text-muted-foreground">Purchase Price</span>
-            <span className="font-medium">
-              {(() => {
-                const currency = asset.custom_fields?.currency || 'INR';
-                const symbols: Record<string, string> = { INR: '₹', USD: '$', EUR: '€', GBP: '£' };
-                return `${symbols[currency] || '₹'}${asset.purchase_price?.toLocaleString() || '0'}`;
-              })()}
-            </span>
           </div>
           <div className="flex justify-between text-sm py-0.5">
             <span className="text-muted-foreground">Current Value</span>

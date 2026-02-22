@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 export default function UpdateSettings() {
   const [apiKey, setApiKey] = useState("");
 
-  // Single-company mode: show tenant_id (no organisation_id usage anywhere)
+  // Single-company mode: show tenant_id
   const { data: tenantId, isLoading } = useQuery({
     queryKey: ["tenant-id"],
     queryFn: async () => {

@@ -99,7 +99,7 @@ export function CompanyInfoTab() {
           Company Information
         </CardTitle>
         <CardDescription className="text-xs">
-          Update your organization details used in reports and asset labels
+          Update your company details used in reports and asset labels
         </CardDescription>
       </CardHeader>
       <CardContent>
