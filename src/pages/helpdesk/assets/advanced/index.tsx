@@ -464,7 +464,7 @@ export default function AdvancedPage() {
             <div>
               <CardTitle className="text-base">{tabConfig?.label}</CardTitle>
               <CardDescription className="text-xs">
-                Manage {tabConfig?.label.toLowerCase()} for your organization
+                Manage {tabConfig?.label.toLowerCase()} for your company
               </CardDescription>
             </div>
           </div>

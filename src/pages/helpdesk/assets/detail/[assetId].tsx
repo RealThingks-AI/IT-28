@@ -286,7 +286,7 @@ const AssetDetail = () => {
           {/* More Actions Dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="default" size="sm" className="gap-1 bg-green-600 hover:bg-green-700">
+              <Button variant="default" size="sm" className="gap-1">
                 More Actions
               </Button>
             </DropdownMenuTrigger>

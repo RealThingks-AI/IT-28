@@ -36,13 +36,14 @@ const TicketDetail = lazy(() => import("./pages/helpdesk/tickets/[id]"));
 const HelpdeskProblemDetail = lazy(() => import("./pages/helpdesk/problems/[id]"));
 const AssignmentRules = lazy(() => import("./pages/helpdesk/tickets/assignment-rules"));
 
-// Lazy loaded - Assets
-const HelpdeskAssets = lazy(() => import("./pages/helpdesk/assets"));
+// Eagerly loaded - Assets (frequently visited)
+import HelpdeskAssets from "./pages/helpdesk/assets";
+import AllAssets from "./pages/helpdesk/assets/allassets";
+import AssetDashboard from "./pages/helpdesk/assets/dashboard";
+
+// Lazy loaded - Assets (less frequent)
 const AssetDetail = lazy(() => import("./pages/helpdesk/assets/detail/[assetId]"));
 const AssetReports = lazy(() => import("./pages/helpdesk/assets/reports"));
-const AllAssets = lazy(() => import("./pages/helpdesk/assets/allassets"));
-// AssetSetup removed - consolidated into Advanced page
-const AssetDashboard = lazy(() => import("./pages/helpdesk/assets/dashboard"));
 const AssetAlerts = lazy(() => import("./pages/helpdesk/assets/alerts/index"));
 const AssetCheckout = lazy(() => import("./pages/helpdesk/assets/checkout"));
 const AssetCheckin = lazy(() => import("./pages/helpdesk/assets/checkin"));
@@ -52,7 +53,7 @@ const AddAsset = lazy(() => import("./pages/helpdesk/assets/add"));
 const MaintenancesList = lazy(() => import("./pages/helpdesk/assets/lists/index"));
 // Warranties list now handled by advanced page
 // ContractsList removed - functionality moved to /assets/advanced
-const AssetAdvancedPage = lazy(() => import("./pages/helpdesk/assets/advanced/index"));
+import AssetAdvancedPage from "./pages/helpdesk/assets/advanced/index";
 const DepreciationDashboard = lazy(() => import("./pages/helpdesk/assets/depreciation/index"));
 const VendorsList = lazy(() => import("./pages/helpdesk/assets/vendors/index"));
 const AddVendor = lazy(() => import("./pages/helpdesk/assets/vendors/add-vendor"));
@@ -89,7 +90,7 @@ const SystemUpdatesUpdates = lazy(() => import("./pages/helpdesk/system-updates/
 // Lazy loaded - Other Modules
 const HelpdeskChanges = lazy(() => import("./pages/helpdesk/changes"));
 // HelpdeskAdmin removed - deprecated, redirecting to /settings
-const HelpdeskSettings = lazy(() => import("./pages/helpdesk/settings"));
+import HelpdeskSettings from "./pages/helpdesk/settings";
 const AccountSettings = lazy(() => import("./pages/helpdesk/account"));
 const HelpdeskReports = lazy(() => import("./pages/helpdesk/reports"));
 const HelpdeskMonitoring = lazy(() => import("./pages/helpdesk/monitoring"));
@@ -109,7 +110,7 @@ const Status = lazy(() => import("./pages/Status"));
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 2 * 60 * 1000,       // 2 minutes default
+      staleTime: 5 * 60 * 1000,       // 5 minutes default
       gcTime: 10 * 60 * 1000,         // 10 minutes cache retention
       refetchOnWindowFocus: false,    // Don't refetch on tab switch
       refetchOnMount: false,          // Use cache on mount
