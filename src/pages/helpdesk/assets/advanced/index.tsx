@@ -326,11 +326,14 @@ export default function AdvancedPage() {
   const deleteMutation = useMutation({
     mutationFn: async ({ type, id }: { type: string; id: string }) => {
       const tableName = getTableName(type);
-      const { error } = await supabase.from(tableName as any).delete().eq("id", id);
+      const { error } = await supabase
+        .from(tableName as any)
+        .update({ is_active: false, updated_at: new Date().toISOString() } as any)
+        .eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
-      toast.success("Deleted successfully");
+      toast.success("Deactivated successfully");
       queryClient.invalidateQueries({ queryKey: ["itam-sites"] });
       queryClient.invalidateQueries({ queryKey: ["itam-locations"] });
       queryClient.invalidateQueries({ queryKey: ["itam-categories"] });
@@ -340,7 +343,7 @@ export default function AdvancedPage() {
       setItemToDelete(null);
     },
     onError: (error: Error) => {
-      toast.error("Failed to delete: " + error.message);
+      toast.error("Failed to deactivate: " + error.message);
       setDeleteDialogOpen(false);
     },
   });
@@ -1208,9 +1211,9 @@ export default function AdvancedPage() {
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete {itemToDelete?.type}</DialogTitle>
+            <DialogTitle>Deactivate {itemToDelete?.type}</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete "{itemToDelete?.name}"? This action cannot be undone.
+              Are you sure you want to deactivate "{itemToDelete?.name}"? It will be hidden from all dropdowns and lists but can be reactivated later.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1224,7 +1227,7 @@ export default function AdvancedPage() {
               }}
               disabled={deleteMutation.isPending}
             >
-              {deleteMutation.isPending ? "Deleting..." : "Delete"}
+              {deleteMutation.isPending ? "Deactivating..." : "Deactivate"}
             </Button>
           </DialogFooter>
         </DialogContent>
