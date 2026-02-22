@@ -85,7 +85,7 @@ export default function BulkActionsPage() {
             <CardContent className="flex gap-2">
               <Button
                 size="sm"
-                onClick={() => bulkUpdateMutation.mutate({ status: "assigned" })}
+                onClick={() => bulkUpdateMutation.mutate({ status: "in_use" })}
                 disabled={bulkUpdateMutation.isPending}
               >
                 <UserCheck className="h-4 w-4 mr-2" />
@@ -112,7 +112,7 @@ export default function BulkActionsPage() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => bulkUpdateMutation.mutate({ status: "in_repair" })}
+                onClick={() => bulkUpdateMutation.mutate({ status: "maintenance" })}
                 disabled={bulkUpdateMutation.isPending}
               >
                 <Wrench className="h-4 w-4 mr-2" />

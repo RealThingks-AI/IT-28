@@ -1,9 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { useOrganisation } from "@/contexts/OrganisationContext";
 import { BackButton } from "@/components/BackButton";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -17,14 +15,11 @@ import { Search, FileCheck } from "lucide-react";
 import { format } from "date-fns";
 
 const AssetAudit = () => {
-  const { organisation } = useOrganisation();
   const [searchTerm, setSearchTerm] = useState("");
 
   const { data: auditLogs = [], isLoading } = useQuery({
-    queryKey: ["itam-audit-logs", organisation?.id, searchTerm],
+    queryKey: ["itam-audit-logs", searchTerm],
     queryFn: async () => {
-      if (!organisation?.id) return [];
-
       const { data, error } = await supabase
         .from("itam_asset_history")
         .select("*, itam_assets(asset_tag, name)")
@@ -34,7 +29,6 @@ const AssetAudit = () => {
       if (error) throw error;
       return data;
     },
-    enabled: !!organisation?.id,
   });
 
   const filteredLogs = auditLogs.filter((log) =>

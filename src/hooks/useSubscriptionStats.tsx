@@ -1,19 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { useOrganisation } from "@/contexts/OrganisationContext";
 
+/**
+ * Simplified subscription stats hook for single-company internal use.
+ * Fetches all subscription data without organisation filtering.
+ */
 export const useSubscriptionStats = () => {
-  const { organisation } = useOrganisation();
-
   return useQuery({
-    queryKey: ["subscription-stats", organisation?.id],
+    queryKey: ["subscription-stats"],
+    staleTime: 5 * 60 * 1000,  // 5 minutes
+    gcTime: 10 * 60 * 1000,    // 10 minutes cache retention
     queryFn: async () => {
-      if (!organisation?.id) return null;
-
       const { data: tools, error } = await supabase
         .from("subscriptions_tools")
-        .select("*")
-        .eq("organisation_id", organisation.id);
+        .select("*");
 
       if (error) throw error;
 
@@ -43,6 +43,5 @@ export const useSubscriptionStats = () => {
         vendorCount,
       };
     },
-    enabled: !!organisation?.id,
   });
 };

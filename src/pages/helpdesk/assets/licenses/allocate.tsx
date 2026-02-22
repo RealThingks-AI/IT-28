@@ -14,6 +14,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { useOrganisationUsers } from "@/hooks/useUsers";
+import { getUserDisplayName } from "@/lib/userUtils";
 
 const AllocateLicense = () => {
   const navigate = useNavigate();
@@ -36,18 +38,10 @@ const AllocateLicense = () => {
     },
   });
 
-  const { data: users = [] } = useQuery({
-    queryKey: ["org-users-allocate"],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("users")
-        .select("id, name, email")
-        .eq("status", "active")
-        .order("name");
-      return data || [];
-    },
-  });
+  // Use centralized organisation users hook
+  const { data: users = [] } = useOrganisationUsers();
 
+  // Get assets assigned to selected user
   const { data: assets = [] } = useQuery({
     queryKey: ["itam-assets-assigned", userId],
     queryFn: async () => {
@@ -168,7 +162,7 @@ const AllocateLicense = () => {
                   <SelectContent>
                     {users.map((user) => (
                       <SelectItem key={user.id} value={user.id}>
-                        {user.name} ({user.email})
+                        {getUserDisplayName(user) || user.email}
                       </SelectItem>
                     ))}
                   </SelectContent>

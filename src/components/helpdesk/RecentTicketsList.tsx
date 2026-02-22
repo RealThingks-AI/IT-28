@@ -10,6 +10,8 @@ export function RecentTicketsList() {
 
   const { data: tickets, isLoading } = useQuery({
     queryKey: ["recent-tickets"],
+    staleTime: 2 * 60 * 1000,  // 2 minutes
+    gcTime: 5 * 60 * 1000,     // 5 minutes cache retention
     queryFn: async () => {
       const { data, error } = await supabase
         .from("helpdesk_tickets")

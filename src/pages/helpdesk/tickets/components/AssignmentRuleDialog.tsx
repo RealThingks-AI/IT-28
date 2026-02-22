@@ -82,7 +82,7 @@ export function AssignmentRuleDialog({ open, onOpenChange, rule }: AssignmentRul
       
       const { data: userData } = await supabase
         .from("users")
-        .select("id, organisation_id")
+        .select("id")
         .eq("auth_user_id", user.id)
         .single();
       
@@ -95,7 +95,7 @@ export function AssignmentRuleDialog({ open, onOpenChange, rule }: AssignmentRul
         .maybeSingle();
       
       return {
-        ...userData,
+        id: userData.id,
         tenant_id: profileData?.tenant_id || 1,
       };
     },
@@ -129,7 +129,6 @@ export function AssignmentRuleDialog({ open, onOpenChange, rule }: AssignmentRul
         actions,
         is_active: true,
         tenant_id: currentUser.tenant_id,
-        organisation_id: currentUser.organisation_id,
       };
 
       if (rule?.id) {

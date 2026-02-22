@@ -12,7 +12,7 @@ export default function NewTicket() {
   const handleOpenChange = (open: boolean) => {
     setDialogOpen(open);
     if (!open) {
-      navigate("/helpdesk");
+      navigate("/");
     }
   };
 
@@ -22,7 +22,7 @@ export default function NewTicket() {
         <Button
           variant="ghost"
           className="mb-6"
-          onClick={() => navigate("/helpdesk")}
+          onClick={() => navigate("/")}
         >
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Dashboard

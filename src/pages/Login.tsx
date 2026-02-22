@@ -1,13 +1,19 @@
 import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { AUTH_CONFIG } from "@/config/auth";
+import { useSessionStore } from "@/stores/useSessionStore";
+import appLogo from "@/assets/app-logo.png";
+
 const Login = () => {
+  const queryClient = useQueryClient();
+  const bootstrap = useSessionStore((s) => s.bootstrap);
   const [isSignup, setIsSignup] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -15,17 +21,11 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const navigate = useNavigate();
-  const {
-    toast
-  } = useToast();
+  const { toast } = useToast();
 
   // Check if already logged in
   useEffect(() => {
-    supabase.auth.getSession().then(({
-      data: {
-        session
-      }
-    }) => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
         navigate("/");
       }
@@ -40,6 +40,7 @@ const Login = () => {
       setRememberMe(true);
     }
   }, []);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -49,9 +50,7 @@ const Login = () => {
       } else {
         localStorage.removeItem("rememberedEmail");
       }
-      const {
-        error
-      } = await supabase.auth.signInWithPassword({
+      const { error } = await supabase.auth.signInWithPassword({
         email,
         password
       });
@@ -66,6 +65,37 @@ const Login = () => {
         }
         throw error;
       }
+
+      // Reset stale state then bootstrap fresh
+      useSessionStore.getState().clear();
+      await bootstrap();
+
+      // Prefetch dashboard data in parallel while navigating
+      queryClient.prefetchQuery({
+        queryKey: ["helpdesk-dashboard-stats"],
+        queryFn: async () => {
+          const { data: tickets } = await supabase
+            .from("helpdesk_tickets")
+            .select("id, status, priority, sla_breached, created_at, resolved_at, first_response_at")
+            .eq("is_deleted", false);
+          return tickets;
+        },
+        staleTime: 5 * 60 * 1000,
+      });
+      queryClient.prefetchQuery({
+        queryKey: ["itam-stats"],
+        queryFn: async () => {
+          const { data } = await supabase.rpc("get_itam_stats");
+          return {
+            totalAssets: (data as any)?.totalAssets || 0,
+            assigned: (data as any)?.assigned || 0,
+            licenses: (data as any)?.licenses || 0,
+            laptops: 0,
+          };
+        },
+        staleTime: 5 * 60 * 1000,
+      });
+
       toast({
         title: "Success",
         description: "Logged in successfully!"
@@ -81,6 +111,7 @@ const Login = () => {
       setLoading(false);
     }
   };
+
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (password.length < 6) {
@@ -95,9 +126,7 @@ const Login = () => {
     try {
       const redirectUrl = AUTH_CONFIG.getSignupRedirectUrl();
       console.log('Signup redirect URL:', redirectUrl);
-      const {
-        error
-      } = await supabase.auth.signUp({
+      const { error } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -124,11 +153,16 @@ const Login = () => {
       setLoading(false);
     }
   };
-  return <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background via-muted/20 to-background">
+
+  return (
+    <main className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background via-muted/20 to-background">
       <div className="w-full max-w-md animate-fade-in">
         <div className="bg-card rounded-lg border border-border shadow-lg p-6">
           {/* Header */}
           <div className="text-center mb-6">
+            <div className="flex items-center justify-center mb-3">
+              <img src={appLogo} alt="RT-IT-Hub" className="w-12 h-12" />
+            </div>
             <h1 className="text-2xl font-bold text-foreground">
               {isSignup ? "Create your RT-IT-Hub account" : "Sign in to RT-IT-Hub"}
             </h1>
@@ -137,8 +171,9 @@ const Login = () => {
             </p>
           </div>
 
-          {!isSignup ? (/* Login Form */
-        <form onSubmit={handleLogin} className="space-y-4">
+          {!isSignup ? (
+            /* Login Form */
+            <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <Input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="name@company.com" autoFocus autoComplete="email" />
@@ -162,13 +197,12 @@ const Login = () => {
               </div>
 
               <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Signing in..." : <>
-                    
-                    Sign in
-                  </>}
+                {loading ? "Signing in..." : "Sign in"}
               </Button>
-            </form>) : (/* Signup Form */
-        <form onSubmit={handleSignup} className="space-y-4">
+            </form>
+          ) : (
+            /* Signup Form */
+            <form onSubmit={handleSignup} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="name">Full Name</Label>
                 <Input id="name" type="text" value={name} onChange={e => setName(e.target.value)} required placeholder="Enter your full name" autoFocus />
@@ -187,22 +221,27 @@ const Login = () => {
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? "Creating account..." : "Create Account"}
               </Button>
-            </form>)}
+            </form>
+          )}
 
           {/* Toggle between Login/Signup */}
           <div className="mt-6 text-center text-sm">
-            {isSignup ? <p className="text-muted-foreground">
+            {isSignup ? (
+              <p className="text-muted-foreground">
                 Already have an account?{" "}
                 <button type="button" onClick={() => {
-              setIsSignup(false);
-              setPassword("");
-            }} className="text-primary hover:underline font-medium">
+                  setIsSignup(false);
+                  setPassword("");
+                }} className="text-primary hover:underline font-medium">
                   Sign in
                 </button>
-              </p> : null}
+              </p>
+            ) : null}
           </div>
         </div>
       </div>
-    </div>;
+    </main>
+  );
 };
+
 export default Login;

@@ -3,26 +3,27 @@ import { useSearchParams, Navigate } from "react-router-dom";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { useUserRole } from "@/hooks/useUserRole";
-import { Users, Lock, ScrollText, Settings2, BarChart3, HardDrive } from "lucide-react";
+import { Users, ScrollText, Settings2, BarChart3, HardDrive, ClipboardCheck } from "lucide-react";
 import { SettingsLoadingSkeleton } from "@/components/settings/SettingsLoadingSkeleton";
 
 // Lazy load settings components
 const AdminUsers = lazy(() => import("@/components/settings/AdminUsers").then(m => ({ default: m.AdminUsers })));
-const AdminAccess = lazy(() => import("@/components/settings/AdminAccess").then(m => ({ default: m.AdminAccess })));
+
 const AdminLogs = lazy(() => import("@/components/settings/AdminLogs").then(m => ({ default: m.AdminLogs })));
 const AdminSystem = lazy(() => import("@/components/settings/AdminSystem").then(m => ({ default: m.AdminSystem })));
 const AdminReports = lazy(() => import("@/components/settings/AdminReports").then(m => ({ default: m.AdminReports })));
 const AdminBackup = lazy(() => import("@/components/settings/AdminBackup").then(m => ({ default: m.AdminBackup })));
+const HelpdeskAudit = lazy(() => import("@/pages/helpdesk/audit"));
 
-type AdminSection = "users" | "access" | "logs" | "system" | "backup" | "reports";
+type AdminSection = "users" | "logs" | "system" | "backup" | "reports" | "audit";
 
 const ADMIN_SECTIONS: { id: AdminSection; label: string; icon: typeof Users }[] = [
   { id: "users", label: "Users", icon: Users },
-  { id: "access", label: "Access", icon: Lock },
   { id: "logs", label: "Logs", icon: ScrollText },
   { id: "system", label: "System", icon: Settings2 },
   { id: "backup", label: "Backup", icon: HardDrive },
   { id: "reports", label: "Reports", icon: BarChart3 },
+  { id: "audit", label: "Audit", icon: ClipboardCheck },
 ];
 
 export default function SettingsModule() {
@@ -44,8 +45,6 @@ export default function SettingsModule() {
     switch (activeSection) {
       case "users":
         return <AdminUsers />;
-      case "access":
-        return <AdminAccess />;
       case "logs":
         return <AdminLogs />;
       case "system":
@@ -54,6 +53,8 @@ export default function SettingsModule() {
         return <AdminBackup />;
       case "reports":
         return <AdminReports />;
+      case "audit":
+        return <HelpdeskAudit />;
       default:
         return <AdminUsers />;
     }

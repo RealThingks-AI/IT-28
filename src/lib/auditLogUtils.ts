@@ -79,7 +79,7 @@ export const MODULE_DISPLAY_NAMES: Record<string, string> = {
   users: "Users",
   user_roles: "User Roles",
   user_tools: "User Tools",
-  organisations: "Organizations",
+  
   subscriptions_tools: "Subscriptions",
   audit_logs: "Audit Logs",
   system_settings: "System Settings",
@@ -140,7 +140,7 @@ export function parseMetadataChanges(metadata: Record<string, unknown> | null): 
   }
 
   // Try to extract from root level (excluding known meta fields)
-  const excludeKeys = ["id", "user_id", "created_at", "updated_at", "organisation_id", "tenant_id", "ip_address", "user_agent"];
+  const excludeKeys = ["id", "user_id", "created_at", "updated_at", "tenant_id", "ip_address", "user_agent"];
   const rootChanges = Object.entries(metadata)
     .filter(([key]) => !excludeKeys.includes(key))
     .slice(0, 5); // Limit to 5 changes

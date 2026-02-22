@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { useOrganisation } from "@/contexts/OrganisationContext";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { SettingsCard } from "./SettingsCard";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -42,67 +42,58 @@ interface BackupSchedule {
 }
 
 export function AdminBackup() {
-  const { organisation } = useOrganisation();
+  const { data: currentUser } = useCurrentUser();
   const queryClient = useQueryClient();
   const [isCreatingBackup, setIsCreatingBackup] = useState(false);
 
   const { data: backups = [], isLoading: backupsLoading } = useQuery({
-    queryKey: ["system-backups", organisation?.id],
+    queryKey: ["system-backups"],
     queryFn: async () => {
-      if (!organisation?.id) return [];
       const { data, error } = await supabase
         .from("system_backups")
         .select("*")
-        .eq("organisation_id", organisation.id)
         .order("created_at", { ascending: false })
         .limit(20);
       if (error) throw error;
       return data as Backup[];
     },
-    enabled: !!organisation?.id,
   });
 
   const { data: schedule, isLoading: scheduleLoading } = useQuery({
-    queryKey: ["backup-schedule", organisation?.id],
+    queryKey: ["backup-schedule"],
     queryFn: async () => {
-      if (!organisation?.id) return null;
       const { data, error } = await supabase
         .from("backup_schedules")
         .select("*")
-        .eq("organisation_id", organisation.id)
-        .single();
+        .limit(1)
+        .maybeSingle();
       if (error && error.code !== "PGRST116") throw error;
       return data as BackupSchedule | null;
     },
-    enabled: !!organisation?.id,
   });
-
   const updateSchedule = useMutation({
     mutationFn: async (updates: Partial<BackupSchedule>) => {
-      if (!organisation?.id) throw new Error("No organization");
-      
       const { data: existing } = await supabase
         .from("backup_schedules")
         .select("id")
-        .eq("organisation_id", organisation.id)
-        .single();
+        .limit(1)
+        .maybeSingle();
 
       if (existing) {
         const { error } = await supabase
           .from("backup_schedules")
-          .update({ ...updates, updated_at: new Date().toISOString() })
-          .eq("organisation_id", organisation.id);
+          .update({ ...updates, updated_at: new Date().toISOString() } as any)
+          .eq("id", existing.id);
         if (error) throw error;
       } else {
         const { error } = await supabase
           .from("backup_schedules")
           .insert({
-            organisation_id: organisation.id,
             ...updates,
             next_backup_at: updates.enabled 
               ? new Date(Date.now() + (updates.frequency_days || 3) * 24 * 60 * 60 * 1000).toISOString()
               : null,
-          });
+          } as any);
         if (error) throw error;
       }
     },
@@ -123,13 +114,12 @@ export function AdminBackup() {
       const { error } = await supabase
         .from("system_backups")
         .insert({
-          organisation_id: organisation?.id,
           backup_name: backupName,
-          file_path: `${organisation?.id}/${backupName}.json`,
+          file_path: `backups/${backupName}.json`,
           backup_type: "manual",
           status: "pending",
           tables_included: ["users", "helpdesk_tickets", "itam_assets", "helpdesk_categories"],
-        });
+        } as any);
       
       if (error) throw error;
       

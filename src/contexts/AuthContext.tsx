@@ -1,7 +1,8 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState, useRef } from "react";
 import { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
+import { useSessionStore } from "@/stores/useSessionStore";
 
 interface AuthContextType {
   user: User | null;
@@ -13,7 +14,8 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const AUTH_INIT_TIMEOUT_MS = 8000;
+// Increased timeout for cold starts - 5 seconds allows for slower initial loads
+const AUTH_INIT_TIMEOUT_MS = 5000;
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -21,73 +23,92 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
   const navigate = useNavigate();
+  
+  // Track if we've already initialized to prevent race conditions
+  const initializedRef = useRef(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    let isMounted = true;
-    let timeoutId: ReturnType<typeof setTimeout>;
+    // Prevent double initialization
+    if (initializedRef.current) return;
+    initializedRef.current = true;
 
-    // Set up auth state listener FIRST (recommended pattern)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        console.log('Auth state change:', event);
-        
-        if (!isMounted) return;
-
-        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED' || event === 'INITIAL_SESSION') {
-          setSession(session);
-          setUser(session?.user ?? null);
-          setLoading(false);
-          setAuthError(null);
-        } else if (event === 'SIGNED_OUT') {
-          setSession(null);
-          setUser(null);
-          setLoading(false);
-        }
+    // Clear timeout helper
+    const clearTimeoutIfSet = () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
       }
-    );
+    };
 
-    // Then get initial session
-    supabase.auth.getSession()
-      .then(({ data: { session }, error }) => {
-        if (!isMounted) return;
-        if (error) {
-          console.error('Failed to get session:', error);
-          setAuthError(error.message);
-        }
-        setSession(session);
-        setUser(session?.user ?? null);
-        setLoading(false);
-      })
-      .catch((err) => {
-        if (!isMounted) return;
-        console.error('Auth initialization error:', err);
-        setAuthError(err.message || 'Failed to initialize authentication');
-        setLoading(false);
-      });
-
-    // Timeout fallback to prevent infinite loading
-    timeoutId = setTimeout(() => {
-      if (isMounted && loading) {
+    // Set up timeout fallback (will be cleared on success)
+    timeoutRef.current = setTimeout(() => {
+      if (loading) {
         console.warn('Auth initialization timed out');
         setLoading(false);
         setAuthError('Authentication initialization timed out');
       }
     }, AUTH_INIT_TIMEOUT_MS);
 
+    // Get initial session FIRST, then set up listener
+    supabase.auth.getSession()
+      .then(({ data: { session: initialSession }, error }) => {
+        // Clear timeout immediately - we got a response
+        clearTimeoutIfSet();
+        
+        if (error) {
+          console.error('Failed to get session:', error);
+          setAuthError(error.message);
+        }
+        
+        setSession(initialSession);
+        setUser(initialSession?.user ?? null);
+        setLoading(false);
+      })
+      .catch((err) => {
+        clearTimeoutIfSet();
+        console.error('Auth initialization error:', err);
+        setAuthError(err.message || 'Failed to initialize authentication');
+        setLoading(false);
+      });
+
+    // Set up auth state listener for FUTURE changes only
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, newSession) => {
+        console.log('Auth state change:', event);
+        
+        // Only update state for actual changes, not initial session
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+          setSession(newSession);
+          setUser(newSession?.user ?? null);
+          setAuthError(null);
+        } else if (event === 'SIGNED_OUT') {
+          setSession(null);
+          setUser(null);
+        }
+        // Ignore INITIAL_SESSION - we handle it via getSession()
+      }
+    );
+
     return () => {
-      isMounted = false;
-      clearTimeout(timeoutId);
+      clearTimeoutIfSet();
       subscription.unsubscribe();
     };
   }, []);
 
   const signOut = async () => {
     try {
+      // Clear session store on sign-out
+      useSessionStore.getState().clear();
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
     } catch (error) {
       console.error("Error signing out:", error);
-      localStorage.clear();
+      Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('sb-') || key.includes('supabase')) {
+          localStorage.removeItem(key);
+        }
+      });
       setUser(null);
       setSession(null);
     } finally {

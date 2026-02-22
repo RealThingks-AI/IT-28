@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { AssetTopBar } from "@/components/helpdesk/assets/AssetTopBar";
+import { AssetModuleTopBar } from "@/components/helpdesk/assets/AssetModuleTopBar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -104,14 +104,14 @@ const AlertsPage = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <AssetTopBar />
+      <AssetModuleTopBar />
       
       <div className="p-4 space-y-4">
         {/* Summary Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card className={`cursor-pointer transition-all ${initialTab === "warranty" ? "ring-2 ring-primary" : ""}`}>
             <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-full bg-purple-100">
+              <div className="p-2 rounded-lg bg-purple-100">
                 <Calendar className="h-5 w-5 text-purple-600" />
               </div>
               <div>
@@ -123,7 +123,7 @@ const AlertsPage = () => {
 
           <Card className={`cursor-pointer transition-all ${initialTab === "maintenance" ? "ring-2 ring-primary" : ""}`}>
             <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-full bg-yellow-100">
+              <div className="p-2 rounded-lg bg-yellow-100">
                 <Wrench className="h-5 w-5 text-yellow-600" />
               </div>
               <div>
@@ -135,7 +135,7 @@ const AlertsPage = () => {
 
           <Card className={`cursor-pointer transition-all ${initialTab === "overdue" ? "ring-2 ring-primary" : ""}`}>
             <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-full bg-red-100">
+              <div className="p-2 rounded-lg bg-red-100">
                 <AlertTriangle className="h-5 w-5 text-red-600" />
               </div>
               <div>
@@ -147,7 +147,7 @@ const AlertsPage = () => {
 
           <Card className={`cursor-pointer transition-all ${initialTab === "licenses" ? "ring-2 ring-primary" : ""}`}>
             <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-full bg-blue-100">
+              <div className="p-2 rounded-lg bg-blue-100">
                 <FileText className="h-5 w-5 text-blue-600" />
               </div>
               <div>

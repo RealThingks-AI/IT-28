@@ -142,6 +142,20 @@ const AssetDashboard = () => {
     }
   });
 
+  // Fetch expiring leases (next 30 days) - stored in custom_fields
+  const expiringLeases = useMemo(() => {
+    const thirtyDaysFromNow = new Date();
+    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+    const today = new Date();
+    return assets.filter(asset => {
+      const customFields = asset.custom_fields as Record<string, any> | null;
+      const leaseExpiry = customFields?.lease_expiry;
+      if (!leaseExpiry) return false;
+      const expiryDate = new Date(leaseExpiry);
+      return expiryDate <= thirtyDaysFromNow && expiryDate >= today;
+    });
+  }, [assets]);
+
   // Fetch maintenance due
   const {
     data: maintenanceDue = []
@@ -162,8 +176,8 @@ const AssetDashboard = () => {
   const activeAssets = assets.filter(a => a.status !== "disposed" && a.status !== "lost").length;
   const availableAssets = assets.filter(a => a.status === "available").length;
   const totalValue = assets.reduce((sum, a) => sum + (parseFloat(String(a.purchase_price || 0)) || 0), 0);
-  const checkedOutCount = assets.filter(a => a.status === "assigned" || a.status === "checked_out").length;
-  const underRepairCount = assets.filter(a => a.status === "in_repair").length;
+  const checkedOutCount = assets.filter(a => a.status === "in_use").length;
+  const underRepairCount = assets.filter(a => a.status === "maintenance").length;
   const disposedCount = assets.filter(a => a.status === "disposed").length;
 
   // Get fiscal year purchases (assuming fiscal year starts in April)
@@ -224,9 +238,9 @@ const AssetDashboard = () => {
     return events;
   }, [expiringWarranties, maintenanceDue]);
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat('en-IN', {
       style: 'currency',
-      currency: 'USD',
+      currency: 'INR',
       minimumFractionDigits: 0,
       maximumFractionDigits: 0
     }).format(value);
@@ -291,7 +305,7 @@ const AssetDashboard = () => {
         showExport={false}
       />
 
-      <div className="p-4 md:p-6 space-y-6">
+      <div className="p-4 space-y-4">
 
         {/* Stats Cards Row */}
         {assetsLoading ? <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -309,13 +323,17 @@ const AssetDashboard = () => {
             case "fiscalPurchases":
               return <AssetStatCard key={widget.id} title="Purchases in Fiscal Year" value={formatCurrency(fiscalYearValue)} subtitle={`${fiscalYearPurchases.length} assets purchased`} icon={ShoppingCart} iconBgColor="bg-orange-500" iconColor="text-white" animationDelay={animationDelay} />;
             case "checkedOut":
-              return <AssetStatCard key={widget.id} title="Checked-out Assets" value={checkedOutCount} subtitle="Currently assigned" icon={Package} iconBgColor="bg-cyan-500" iconColor="text-white" onClick={() => navigate("/assets/allassets?status=assigned")} animationDelay={animationDelay} />;
+              return <AssetStatCard key={widget.id} title="Checked-out Assets" value={checkedOutCount} subtitle="Currently assigned" icon={Package} iconBgColor="bg-cyan-500" iconColor="text-white" onClick={() => navigate("/assets/allassets?status=in_use")} animationDelay={animationDelay} />;
             case "underRepair":
               return <AssetStatCard key={widget.id} title="Under Repair" value={underRepairCount} subtitle="In maintenance" icon={Wrench} iconBgColor="bg-yellow-500" iconColor="text-white" onClick={() => navigate("/assets/repairs")} animationDelay={animationDelay} />;
             case "disposed":
               return <AssetStatCard key={widget.id} title="Disposed Assets" value={disposedCount} subtitle="Retired assets" icon={Package} iconBgColor="bg-gray-500" iconColor="text-white" onClick={() => navigate("/assets/allassets?status=disposed")} animationDelay={animationDelay} />;
             case "contracts":
               return <AssetStatCard key={widget.id} title="Active Contracts" value={0} subtitle="Under contract" icon={FileText} iconBgColor="bg-indigo-500" iconColor="text-white" onClick={() => navigate("/assets/lists/contracts")} animationDelay={animationDelay} />;
+            case "warrantyExpiring":
+              return <AssetStatCard key={widget.id} title="Warranty Expiring" value={expiringWarranties.length} subtitle="Within 30 days" icon={AlertTriangle} iconBgColor="bg-amber-500" iconColor="text-white" onClick={() => navigate("/assets/allassets?warranty=expiring")} animationDelay={animationDelay} />;
+            case "leaseExpiring":
+              return <AssetStatCard key={widget.id} title="Lease Expiring" value={expiringLeases.length} subtitle="Within 30 days" icon={Calendar} iconBgColor="bg-rose-500" iconColor="text-white" onClick={() => navigate("/assets/allassets?lease=expiring")} animationDelay={animationDelay} />;
             default:
               return null;
           }
@@ -480,7 +498,7 @@ const AssetDashboard = () => {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                 {/* Assets Due */}
                 <div className="flex items-center gap-3 p-3 rounded-lg border border-red-200 bg-red-50/50 dark:bg-red-950/20 dark:border-red-900 cursor-pointer hover:border-red-400 hover:shadow-sm transition-all duration-200 hover:-translate-y-0.5" onClick={() => navigate("/assets/alerts?type=overdue")}>
-                  <div className="p-2 rounded-full bg-red-100 dark:bg-red-900/50">
+                  <div className="p-2 rounded-lg bg-red-100 dark:bg-red-900/50">
                     <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
                   </div>
                   <div>
@@ -491,7 +509,7 @@ const AssetDashboard = () => {
 
                 {/* Maintenance Due */}
                 <div className="flex items-center gap-3 p-3 rounded-lg border border-green-200 bg-green-50/50 dark:bg-green-950/20 dark:border-green-900 cursor-pointer hover:border-green-400 hover:shadow-sm transition-all duration-200 hover:-translate-y-0.5" onClick={() => navigate("/assets/alerts?type=maintenance")}>
-                  <div className="p-2 rounded-full bg-green-100 dark:bg-green-900/50">
+                  <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/50">
                     <Wrench className="h-5 w-5 text-green-600 dark:text-green-400" />
                   </div>
                   <div>
@@ -502,7 +520,7 @@ const AssetDashboard = () => {
 
                 {/* Contracts Pending */}
                 <div className="flex items-center gap-3 p-3 rounded-lg border border-orange-200 bg-orange-50/50 dark:bg-orange-950/20 dark:border-orange-900 cursor-pointer hover:border-orange-400 hover:shadow-sm transition-all duration-200 hover:-translate-y-0.5" onClick={() => navigate("/assets/alerts?type=contracts")}>
-                  <div className="p-2 rounded-full bg-orange-100 dark:bg-orange-900/50">
+                  <div className="p-2 rounded-lg bg-orange-100 dark:bg-orange-900/50">
                     <FileText className="h-5 w-5 text-orange-600 dark:text-orange-400" />
                   </div>
                   <div>
@@ -513,7 +531,7 @@ const AssetDashboard = () => {
 
                 {/* Warranty Pending */}
                 <div className="flex items-center gap-3 p-3 rounded-lg border border-purple-200 bg-purple-50/50 dark:bg-purple-950/20 dark:border-purple-900 cursor-pointer hover:border-purple-400 hover:shadow-sm transition-all duration-200 hover:-translate-y-0.5" onClick={() => navigate("/assets/alerts?type=warranty")}>
-                  <div className="p-2 rounded-full bg-purple-100 dark:bg-purple-900/50">
+                  <div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/50">
                     <Calendar className="h-5 w-5 text-purple-600 dark:text-purple-400" />
                   </div>
                   <div>

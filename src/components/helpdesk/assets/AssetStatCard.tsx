@@ -51,7 +51,7 @@ export function AssetStatCard({
             <p className="text-sm font-medium text-muted-foreground truncate">
               {title}
             </p>
-            <h3 className="text-3xl font-bold text-foreground mt-0.5 tabular-nums">
+            <h3 className="text-2xl font-bold text-foreground mt-0.5 tabular-nums">
               {value}
             </h3>
             {subtitle && (

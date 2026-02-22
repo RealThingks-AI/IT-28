@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Package, Plus, Clock, TrendingDown, DollarSign, AlertCircle, Wrench, CheckCircle } from "lucide-react";
+import { Package, Plus, TrendingDown, DollarSign, AlertCircle, Wrench, CheckCircle } from "lucide-react";
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -10,42 +10,23 @@ import { Skeleton } from "@/components/ui/skeleton";
 export default function HelpdeskAssets() {
   const navigate = useNavigate();
 
-  // Optimized data fetching
+  // Simplified data fetching - no org/tenant filtering
   const {
     data: assetData,
     isLoading
   } = useQuery({
     queryKey: ["assets-overview"],
     queryFn: async () => {
-      const {
-        data: {
-          user
-        }
-      } = await supabase.auth.getUser();
-      if (!user) return null;
+      // Fetch all active assets (RLS handles access control)
+      const { data: assets, error } = await supabase
+        .from("itam_assets")
+        .select("*")
+        .eq("is_active", true);
 
-      // Parallel fetch user context
-      const [userData, profileData] = await Promise.all([
-        supabase.from("users").select("organisation_id").eq("auth_user_id", user.id).single(), 
-        supabase.from("profiles").select("tenant_id").eq("id", user.id).maybeSingle()
-      ]);
-      const tenantId = profileData.data?.tenant_id || 1;
-      const orgId = userData.data?.organisation_id;
-
-      // Build base query
-      // @ts-ignore - Bypass deep type inference issue
-      let assetsQuery = supabase.from("itam_assets").select("*").eq("is_active", true);
-      
-      if (orgId) {
-        assetsQuery = assetsQuery.eq("organisation_id", orgId);
-      } else {
-        assetsQuery = assetsQuery.eq("tenant_id", tenantId);
-      }
-
-      const assetsResult = await assetsQuery;
+      if (error) throw error;
       
       return {
-        assets: assetsResult.data || [],
+        assets: assets || [],
         recentEvents: []
       };
     },
@@ -213,7 +194,12 @@ export default function HelpdeskAssets() {
             <div className="flex items-start justify-between">
               <div className="flex-1">
                 <p className="text-xs text-muted-foreground mb-0.5">Total Value</p>
-                <p className="text-xl font-bold">₹{(metrics.totalValue / 100000).toFixed(1)}L</p>
+                <p className="text-xl font-bold">
+                  {metrics.totalValue >= 100000 
+                    ? `₹${(metrics.totalValue / 100000).toFixed(1)}L`
+                    : `₹${metrics.totalValue.toLocaleString("en-IN")}`
+                  }
+                </p>
               </div>
               <div className="w-8 h-8 rounded-md bg-purple-500/10 flex items-center justify-center">
                 <DollarSign className="w-4 h-4 text-purple-500" />
@@ -228,7 +214,12 @@ export default function HelpdeskAssets() {
             <div className="flex items-start justify-between">
               <div className="flex-1">
                 <p className="text-xs text-muted-foreground mb-0.5">Net Book Value</p>
-                <p className="text-xl font-bold">₹{(metrics.netBookValue / 100000).toFixed(1)}L</p>
+                <p className="text-xl font-bold">
+                  {metrics.netBookValue >= 100000 
+                    ? `₹${(metrics.netBookValue / 100000).toFixed(1)}L`
+                    : `₹${metrics.netBookValue.toLocaleString("en-IN")}`
+                  }
+                </p>
               </div>
               <div className="w-8 h-8 rounded-md bg-green-500/10 flex items-center justify-center">
                 <DollarSign className="w-4 h-4 text-green-500" />

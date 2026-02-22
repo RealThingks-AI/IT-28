@@ -46,28 +46,11 @@ serve(async (req) => {
       );
     }
 
-    // Get user's organization
-    const { data: userData, error: userDataError } = await supabaseClient
-      .from('users')
-      .select('organisation_id')
-      .eq('auth_user_id', user.id)
-      .single();
-
-    if (userDataError || !userData?.organisation_id) {
-      return new Response(
-        JSON.stringify({ error: 'Organization not found' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const organisationId = userData.organisation_id;
-
-    // Get category tag format configuration
+    // Get category tag format configuration (no org filtering needed for single-company setup)
     const { data: tagFormat, error: tagError } = await supabaseClient
       .from('category_tag_formats')
       .select('prefix, current_number, zero_padding')
       .eq('category_id', category_id)
-      .eq('organisation_id', organisationId)
       .maybeSingle();
 
     if (tagError) {
@@ -121,6 +104,16 @@ serve(async (req) => {
         JSON.stringify({ error: 'Could not generate unique asset ID after maximum attempts' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
+    }
+
+    // Reserve the ID by advancing the counter
+    const { error: updateError } = await supabaseClient
+      .from('category_tag_formats')
+      .update({ current_number: currentNumber + 1 })
+      .eq('category_id', category_id);
+
+    if (updateError) {
+      console.error('Error updating counter:', updateError);
     }
 
     return new Response(

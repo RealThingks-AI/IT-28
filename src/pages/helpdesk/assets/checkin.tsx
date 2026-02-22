@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { BackButton } from "@/components/BackButton";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,6 +49,22 @@ const CheckinPage = () => {
     },
   });
 
+  // Fetch users for name lookup
+  const { data: usersData = [] } = useQuery({
+    queryKey: ["users-for-checkin"],
+    queryFn: async () => {
+      const { data } = await supabase.from("users").select("id, name, email");
+      return data || [];
+    },
+  });
+
+  // Helper to get user name by ID
+  const getUserName = (userId: string | null) => {
+    if (!userId) return "Unknown";
+    const user = usersData.find((u) => u.id === userId);
+    return user?.name || user?.email || userId;
+  };
+
   // Checkin mutation
   const checkinMutation = useMutation({
     mutationFn: async () => {
@@ -73,18 +88,38 @@ const CheckinPage = () => {
         .filter(a => selectedAssignments.includes(a.id))
         .map(a => a.asset_id);
 
-      // Update asset statuses to available
+      // Update asset statuses to available AND clear assignment fields
       const { error: updateError } = await supabase
         .from("itam_assets")
-        .update({ status: "available" })
+        .update({ 
+          status: "available",
+          assigned_to: null,
+          checked_out_to: null,
+          checked_out_at: null,
+          expected_return_date: null,
+          check_out_notes: null,
+        })
         .in("id", assetIds);
 
       if (updateError) throw updateError;
+
+      // Log to history for each asset
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      for (const assetId of assetIds) {
+        await supabase.from("itam_asset_history").insert({
+          asset_id: assetId,
+          action: "checked_in",
+          details: { notes, returned_at: now },
+          performed_by: currentUser?.id,
+        });
+      }
     },
     onSuccess: () => {
       toast.success(`${selectedAssignments.length} asset(s) checked in successfully`);
       queryClient.invalidateQueries({ queryKey: ["itam-assets"] });
       queryClient.invalidateQueries({ queryKey: ["itam-active-assignments"] });
+      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets"] });
+      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets-count"] });
       navigate("/assets/allassets");
     },
     onError: (error: any) => {
@@ -105,11 +140,8 @@ const CheckinPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <BackButton />
-      
+    <div className="bg-background">
       <div className="p-4 space-y-4">
-        <h1 className="text-xl font-semibold">Check In Assets</h1>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Asset Selection */}
           <Card className="lg:col-span-2">
@@ -176,7 +208,7 @@ const CheckinPage = () => {
                         <TableCell className="font-medium">{assignment.asset?.name}</TableCell>
                         <TableCell>{assignment.asset?.asset_tag || assignment.asset?.asset_id}</TableCell>
                         <TableCell>
-                          {assignment.assigned_to || 'Unknown'}
+                          {getUserName(assignment.assigned_to)}
                         </TableCell>
                         <TableCell>
                           {assignment.assigned_at ? format(new Date(assignment.assigned_at), 'MMM dd, yyyy') : 'N/A'}

@@ -28,7 +28,7 @@ export default function HelpdeskDashboard() {
           value={ticketStats?.open || 0}
           icon={AlertCircle}
           color="text-orange-500"
-          href="/tickets?status=open"
+          href="/tickets/list?status=open"
           subtitle={ticketStats?.slaBreached ? `${ticketStats.slaBreached} SLA breached` : "On track"}
         />
         <DashboardStatCard
@@ -36,21 +36,21 @@ export default function HelpdeskDashboard() {
           value={ticketStats?.inProgress || 0}
           icon={Clock}
           color="text-purple-500"
-          href="/tickets?status=in_progress"
+          href="/tickets/list?status=in_progress"
         />
         <DashboardStatCard
           title="Resolved"
           value={ticketStats?.resolved || 0}
           icon={CheckCircle2}
           color="text-green-500"
-          href="/tickets?status=resolved"
+          href="/tickets/list?status=resolved"
         />
         <DashboardStatCard
           title="Assets"
           value={assetStats?.totalAssets || 0}
           icon={Package}
           color="text-cyan-500"
-          href="/assets"
+          href="/assets/allassets"
           subtitle={`${assetStats?.assigned || 0} assigned`}
         />
         <DashboardStatCard
@@ -89,55 +89,47 @@ export default function HelpdeskDashboard() {
 
       {/* ITAM Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="min-h-[100px]">
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Assets</CardTitle>
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold min-h-[32px]">
-              {assetStats?.totalAssets || 0}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1 min-h-[16px]">Across all types</p>
+            <div className="text-2xl font-bold">{assetStats?.totalAssets || 0}</div>
+            <p className="text-xs text-muted-foreground mt-1">Across all types</p>
           </CardContent>
         </Card>
 
-        <Card className="min-h-[100px]">
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Laptops</CardTitle>
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold min-h-[32px]">
-              {assetStats?.laptops || 0}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1 min-h-[16px]">In inventory</p>
+            <div className="text-2xl font-bold">{assetStats?.laptops || 0}</div>
+            <p className="text-xs text-muted-foreground mt-1">In inventory</p>
           </CardContent>
         </Card>
 
-        <Card className="min-h-[100px]">
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Assigned</CardTitle>
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold min-h-[32px]">
-              {assetStats?.assigned || 0}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1 min-h-[16px]">To employees</p>
+            <div className="text-2xl font-bold">{assetStats?.assigned || 0}</div>
+            <p className="text-xs text-muted-foreground mt-1">To employees</p>
           </CardContent>
         </Card>
 
-        <Card className="min-h-[100px]">
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Licenses</CardTitle>
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold min-h-[32px]">
-              {assetStats?.licenses || 0}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1 min-h-[16px]">Active licenses</p>
+            <div className="text-2xl font-bold">{assetStats?.licenses || 0}</div>
+            <p className="text-xs text-muted-foreground mt-1">Active licenses</p>
           </CardContent>
         </Card>
       </div>

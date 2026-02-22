@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { BackButton } from "@/components/BackButton";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +17,8 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 import { CalendarIcon, Search, UserCheck, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useOrganisationUsers } from "@/hooks/useUsers";
+import { getUserDisplayName } from "@/lib/userUtils";
 
 const CheckoutPage = () => {
   const navigate = useNavigate();
@@ -48,18 +49,8 @@ const CheckoutPage = () => {
     },
   });
 
-  // Fetch users for assignment
-  const { data: users = [] } = useQuery({
-    queryKey: ["users-for-assignment"],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("users")
-        .select("id, name, email")
-        .eq("status", "active")
-        .order("name");
-      return data || [];
-    },
-  });
+  // Fetch users from organisation (centralized hook)
+  const { data: users = [] } = useOrganisationUsers();
 
   // Checkout mutation
   const checkoutMutation = useMutation({
@@ -67,11 +58,15 @@ const CheckoutPage = () => {
       if (selectedAssets.length === 0) throw new Error("Please select at least one asset");
       if (!assignTo) throw new Error("Please select a person to assign to");
 
+      const now = new Date().toISOString();
+      const selectedUser = users.find((u) => u.id === assignTo);
+      const assignedToName = getUserDisplayName(selectedUser) || selectedUser?.email || assignTo;
+
       // Create assignments for all selected assets
       const assignments = selectedAssets.map(assetId => ({
         asset_id: assetId,
         assigned_to: assignTo,
-        assigned_at: new Date().toISOString(),
+        assigned_at: now,
         expected_return_date: expectedReturn?.toISOString() || null,
         notes: notes || null,
       }));
@@ -82,17 +77,42 @@ const CheckoutPage = () => {
 
       if (assignError) throw assignError;
 
-      // Update asset statuses to in_use (matches database constraint)
+      // Update asset statuses and assignment fields
       const { error: updateError } = await supabase
         .from("itam_assets")
-        .update({ status: "in_use" })
+        .update({ 
+          status: "in_use",
+          assigned_to: assignedToName,
+          checked_out_to: assignTo,
+          checked_out_at: now,
+          expected_return_date: expectedReturn?.toISOString() || null,
+          check_out_notes: notes || null,
+        })
         .in("id", selectedAssets);
 
       if (updateError) throw updateError;
+
+      // Log to history for each asset
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      for (const assetId of selectedAssets) {
+        await supabase.from("itam_asset_history").insert({
+          asset_id: assetId,
+          action: "checked_out",
+          details: { 
+            assigned_to: assignedToName,
+            user_id: assignTo,
+            expected_return: expectedReturn?.toISOString(),
+            notes,
+          },
+          performed_by: currentUser?.id,
+        });
+      }
     },
     onSuccess: () => {
       toast.success(`${selectedAssets.length} asset(s) checked out successfully`);
       queryClient.invalidateQueries({ queryKey: ["itam-assets"] });
+      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets"] });
+      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets-count"] });
       navigate("/assets/allassets");
     },
     onError: (error: any) => {
@@ -113,11 +133,8 @@ const CheckoutPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <BackButton />
-      
+    <div className="bg-background">
       <div className="p-4 space-y-4">
-        <h1 className="text-xl font-semibold">Check Out Assets</h1>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Asset Selection */}
           <Card className="lg:col-span-2">
@@ -216,7 +233,7 @@ const CheckoutPage = () => {
                   <SelectContent>
                     {users.map((user) => (
                       <SelectItem key={user.id} value={user.id}>
-                        {user.name || user.email}
+                        {getUserDisplayName(user) || user.email}
                       </SelectItem>
                     ))}
                   </SelectContent>

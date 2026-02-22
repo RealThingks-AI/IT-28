@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { useOrganisation } from "@/contexts/OrganisationContext";
 import { BackButton } from "@/components/BackButton";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,7 +12,6 @@ import { toast } from "sonner";
 
 const AddVendor = () => {
   const navigate = useNavigate();
-  const { organisation } = useOrganisation();
   const queryClient = useQueryClient();
 
   const [formData, setFormData] = useState({
@@ -42,7 +40,6 @@ const AddVendor = () => {
       const { error } = await supabase.from("itam_vendors").insert({
         ...data,
         tenant_id: tenantId,
-        organisation_id: organisation?.id,
       });
 
       if (error) throw error;

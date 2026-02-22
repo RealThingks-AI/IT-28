@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { AssetTopBar } from "@/components/helpdesk/assets/AssetTopBar";
+import { AssetModuleTopBar } from "@/components/helpdesk/assets/AssetModuleTopBar";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,15 +55,17 @@ const DisposePage = () => {
       if (selectedAssets.length === 0) throw new Error("Please select at least one asset");
       if (!disposalMethod) throw new Error("Please select a disposal method");
 
-      // Update assets to disposed status
+      // Update assets to disposed status - store disposal details in custom_fields
       const { error } = await supabase
         .from("itam_assets")
         .update({ 
           status: "disposed",
-          disposal_date: disposalDate.toISOString(),
-          disposal_method: disposalMethod,
-          disposal_value: disposalValue ? parseFloat(disposalValue) : null,
-          notes: notes || null
+          notes: notes || null,
+          custom_fields: {
+            disposal_date: disposalDate.toISOString(),
+            disposal_method: disposalMethod,
+            disposal_value: disposalValue ? parseFloat(disposalValue) : null,
+          }
         })
         .in("id", selectedAssets);
 
@@ -97,7 +99,7 @@ const DisposePage = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <AssetTopBar />
+      <AssetModuleTopBar />
       
       <div className="p-4 space-y-4">
         {/* Warning Banner */}
@@ -180,7 +182,9 @@ const DisposePage = () => {
                           <Badge variant="secondary">{asset.status}</Badge>
                         </TableCell>
                         <TableCell>
-                          {asset.purchase_price ? `$${parseFloat(String(asset.purchase_price)).toLocaleString()}` : 'N/A'}
+                          {asset.purchase_price 
+                            ? `₹${parseFloat(String(asset.purchase_price)).toLocaleString('en-IN')}` 
+                            : 'N/A'}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -210,7 +214,7 @@ const DisposePage = () => {
                 <div className="p-3 bg-accent rounded-lg">
                   <p className="text-sm">
                     <span className="font-medium">Total Value:</span>{' '}
-                    ${totalValue.toLocaleString()}
+                    ₹{totalValue.toLocaleString('en-IN')}
                   </p>
                 </div>
               )}

@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -13,7 +12,9 @@ import {
   Plus,
   FileText,
   TrendingUp,
-  Settings
+  LogOut,
+  LogIn,
+  Calendar
 } from "lucide-react";
 import { BackButton } from "@/components/BackButton";
 
@@ -56,11 +57,11 @@ const ITAMDashboard = () => {
     },
   });
 
-  // Calculate KPIs
+  // Calculate KPIs - using correct database status values
   const totalAssets = assets.length;
   const availableAssets = assets.filter(a => a.status === "available").length;
-  const assignedAssets = assets.filter(a => a.status === "assigned").length;
-  const inRepairAssets = assets.filter(a => a.status === "in_repair").length;
+  const assignedAssets = assets.filter(a => a.status === "in_use").length;
+  const inRepairAssets = assets.filter(a => a.status === "maintenance").length;
   
   const totalLicenses = licenses.reduce((sum, l) => sum + (l.seats_total || 0), 0);
   const allocatedLicenses = licenses.reduce((sum, l) => sum + (l.seats_allocated || 0), 0);
@@ -73,6 +74,15 @@ const ITAMDashboard = () => {
     if (!a.warranty_expiry) return false;
     const warrantyDate = new Date(a.warranty_expiry);
     return warrantyDate <= thirtyDaysFromNow && warrantyDate >= new Date();
+  }).length;
+
+  // Lease expiring soon (30 days) - stored in custom_fields
+  const expiringLease = assets.filter(a => {
+    const customFields = a.custom_fields as Record<string, any> | null;
+    const leaseExpiry = customFields?.lease_expiry;
+    if (!leaseExpiry) return false;
+    const leaseDate = new Date(leaseExpiry);
+    return leaseDate <= thirtyDaysFromNow && leaseDate >= new Date();
   }).length;
 
   const stats = [
@@ -88,7 +98,7 @@ const ITAMDashboard = () => {
       value: assignedAssets,
       icon: UserCheck,
       description: "Currently in use",
-      onClick: () => navigate("/assets/allassets?status=assigned"),
+      onClick: () => navigate("/assets/allassets?status=in_use"),
     },
     {
       title: "In Repair",
@@ -105,6 +115,13 @@ const ITAMDashboard = () => {
       onClick: () => navigate("/assets/allassets?warranty=expiring"),
     },
     {
+      title: "Lease Expiring",
+      value: expiringLease,
+      icon: Calendar,
+      description: "Within 30 days",
+      onClick: () => navigate("/assets/allassets?lease=expiring"),
+    },
+    {
       title: "License Utilization",
       value: `${licenseUtilization}%`,
       icon: Key,
@@ -115,30 +132,20 @@ const ITAMDashboard = () => {
 
   const quickActions = [
     { label: "Add Asset", icon: Plus, onClick: () => navigate("/assets/add") },
+    { label: "Check Out", icon: LogOut, onClick: () => navigate("/assets/checkout") },
+    { label: "Check In", icon: LogIn, onClick: () => navigate("/assets/checkin") },
     { label: "View Inventory", icon: Package, onClick: () => navigate("/assets/allassets") },
     { label: "Create Repair", icon: Wrench, onClick: () => navigate("/assets/repairs/create") },
     { label: "Purchase Orders", icon: FileText, onClick: () => navigate("/assets/purchase-orders") },
     { label: "Reports", icon: TrendingUp, onClick: () => navigate("/assets/reports") },
-    { label: "Tools", icon: Settings, onClick: () => navigate("/assets/tools") },
   ];
 
   return (
-    <div className="min-h-screen bg-background p-4">
-      <div className="max-w-7xl mx-auto space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <BackButton />
-            <div>
-              <h1 className="text-3xl font-bold">IT Asset Management</h1>
-              <p className="text-muted-foreground">
-                Manage your organization's hardware, software, and licenses
-              </p>
-            </div>
-          </div>
-        </div>
+    <div className="bg-background p-4">
+      <div className="space-y-4">
 
         {/* KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
           {stats.map((stat) => (
             <Card 
               key={stat.title} 
@@ -164,7 +171,7 @@ const ITAMDashboard = () => {
             <CardDescription>Common asset management tasks</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
               {quickActions.map((action) => (
                 <Button
                   key={action.label}
@@ -199,13 +206,13 @@ const ITAMDashboard = () => {
                       <p className="font-medium">{asset.name}</p>
                       <p className="text-sm text-muted-foreground">{asset.asset_tag || asset.asset_id}</p>
                     </div>
-                    <span className={`text-xs px-2 py-1 rounded-full ${
+                    <span className={`text-xs px-2 py-1 rounded ${
                       asset.status === "available" ? "bg-green-100 text-green-800" :
-                      asset.status === "assigned" ? "bg-blue-100 text-blue-800" :
-                      asset.status === "in_repair" ? "bg-yellow-100 text-yellow-800" :
+                      asset.status === "in_use" ? "bg-blue-100 text-blue-800" :
+                      asset.status === "maintenance" ? "bg-yellow-100 text-yellow-800" :
                       "bg-gray-100 text-gray-800"
                     }`}>
-                      {asset.status}
+                      {asset.status === "in_use" ? "Checked Out" : asset.status}
                     </span>
                   </div>
                 ))}
@@ -235,7 +242,7 @@ const ITAMDashboard = () => {
                       <p className="font-medium">Repair #{repair.repair_number || repair.id}</p>
                       <p className="text-sm text-muted-foreground">{repair.issue_description?.substring(0, 50)}...</p>
                     </div>
-                    <span className={`text-xs px-2 py-1 rounded-full ${
+                    <span className={`text-xs px-2 py-1 rounded ${
                       repair.status === "pending" ? "bg-gray-100 text-gray-800" :
                       repair.status === "in_progress" ? "bg-blue-100 text-blue-800" :
                       "bg-green-100 text-green-800"

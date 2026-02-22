@@ -55,10 +55,10 @@ export default function HelpdeskAutomation() {
       if (!user) return null;
       const { data } = await supabase
         .from("users")
-        .select("id, organisation_id, role, auth_user_id")
+        .select("id, role, auth_user_id")
         .eq("auth_user_id", user.id)
         .single();
-      return { ...data, authUserId: user.id };
+      return data ? { ...data, authUserId: user.id } : null;
     },
   });
 
@@ -106,7 +106,7 @@ export default function HelpdeskAutomation() {
       const { data: profileData } = await supabase
         .from("profiles")
         .select("tenant_id")
-        .eq("id", currentUser.id)
+        .eq("id", currentUser.authUserId)
         .maybeSingle();
 
       const payload = {
@@ -117,7 +117,6 @@ export default function HelpdeskAutomation() {
         is_active: isActive,
         conditions: {},
         actions: {},
-        organisation_id: currentUser.organisation_id,
         tenant_id: profileData?.tenant_id || 1,
         created_by: currentUser.authUserId,
       };

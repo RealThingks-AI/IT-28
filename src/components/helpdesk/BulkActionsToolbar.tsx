@@ -1,9 +1,8 @@
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { X, Trash2, UserPlus, Edit3, ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import {
@@ -26,6 +25,8 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
+import { useOrganisationUsers } from "@/hooks/useUsers";
+import { getUserDisplayName } from "@/lib/userUtils";
 
 interface BulkActionsToolbarProps {
   selectedIds: number[];
@@ -36,17 +37,8 @@ export const BulkActionsToolbar = ({ selectedIds, onClearSelection }: BulkAction
   const queryClient = useQueryClient();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
-  const { data: users } = useQuery({
-    queryKey: ['helpdesk-users'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('users')
-        .select('id, name, email')
-        .eq('status', 'active')
-        .order('name');
-      return data || [];
-    }
-  });
+  // Use centralized organisation users hook
+  const { data: users } = useOrganisationUsers();
 
   const bulkUpdateMutation = useMutation({
     mutationFn: async ({ field, value }: { field: string; value: any }) => {
@@ -169,9 +161,9 @@ export const BulkActionsToolbar = ({ selectedIds, onClearSelection }: BulkAction
                   {users?.map((user) => (
                     <DropdownMenuItem 
                       key={user.id} 
-                      onClick={() => bulkUpdateMutation.mutate({ field: 'assigned_to', value: user.id })}
+                      onClick={() => bulkUpdateMutation.mutate({ field: 'assignee_id', value: user.id })}
                     >
-                      {user.name || user.email}
+                      {getUserDisplayName(user) || user.email}
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuSubContent>

@@ -3,8 +3,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Columns, GripVertical, RotateCcw, Save, Check } from "lucide-react";
+import { Columns, GripVertical, RotateCcw, Save, Check, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { useUISettings, HelpdeskColumnSetting } from "@/hooks/useUISettings";
 
 interface ColumnConfig {
   id: string;
@@ -28,31 +29,26 @@ const DEFAULT_COLUMNS: ColumnConfig[] = [
   { id: "queue", label: "Queue", visible: false, order: 11 },
 ];
 
-const STORAGE_KEY = "helpdesk_column_settings";
-
 export const ColumnSettingsManager = () => {
   const [columns, setColumns] = useState<ColumnConfig[]>([]);
   const [hasChanges, setHasChanges] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  
+  const { helpdeskColumns, isLoading, isAuthenticated, updateHelpdeskColumns } = useUISettings();
 
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        // Merge with defaults to handle new columns
-        const merged = DEFAULT_COLUMNS.map(defaultCol => {
-          const savedCol = parsed.find((c: ColumnConfig) => c.id === defaultCol.id);
-          return savedCol ? { ...defaultCol, ...savedCol } : defaultCol;
-        });
-        setColumns(merged.sort((a, b) => a.order - b.order));
-      } catch {
-        setColumns([...DEFAULT_COLUMNS]);
-      }
+    if (helpdeskColumns && helpdeskColumns.length > 0) {
+      // Merge with defaults to handle new columns
+      const merged = DEFAULT_COLUMNS.map(defaultCol => {
+        const savedCol = helpdeskColumns.find((c: HelpdeskColumnSetting) => c.id === defaultCol.id);
+        return savedCol ? { ...defaultCol, visible: savedCol.visible, order: savedCol.order } : defaultCol;
+      });
+      setColumns(merged.sort((a, b) => a.order - b.order));
     } else {
       setColumns([...DEFAULT_COLUMNS]);
     }
-  }, []);
+  }, [helpdeskColumns]);
 
   const toggleColumn = (id: string) => {
     setColumns(prev => 
@@ -90,23 +86,60 @@ export const ColumnSettingsManager = () => {
     setDraggedIndex(null);
   };
 
-  const saveSettings = () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(columns));
-    setHasChanges(false);
-    toast.success("Column settings saved");
-    // Dispatch event for other components to react
-    window.dispatchEvent(new CustomEvent('columnSettingsChanged', { detail: columns }));
+  const saveSettings = async () => {
+    if (isAuthenticated) {
+      setIsSaving(true);
+      try {
+        const settingsToSave: HelpdeskColumnSetting[] = columns.map(col => ({
+          id: col.id,
+          visible: col.visible,
+          order: col.order,
+        }));
+        await updateHelpdeskColumns(settingsToSave);
+        toast.success("Column settings saved");
+        setHasChanges(false);
+        // Dispatch event for other components to react
+        window.dispatchEvent(new CustomEvent('columnSettingsChanged', { detail: columns }));
+      } catch (error) {
+        toast.error("Failed to save column settings");
+        console.error("Failed to save helpdesk columns:", error);
+      } finally {
+        setIsSaving(false);
+      }
+    } else {
+      toast.info("Sign in to save settings across devices");
+    }
   };
 
-  const resetToDefault = () => {
+  const resetToDefault = async () => {
     setColumns([...DEFAULT_COLUMNS]);
-    localStorage.removeItem(STORAGE_KEY);
+    if (isAuthenticated) {
+      try {
+        await updateHelpdeskColumns(DEFAULT_COLUMNS.map(col => ({
+          id: col.id,
+          visible: col.visible,
+          order: col.order,
+        })));
+      } catch (error) {
+        console.error("Failed to reset columns:", error);
+      }
+    }
     setHasChanges(false);
     toast.success("Reset to default columns");
     window.dispatchEvent(new CustomEvent('columnSettingsChanged', { detail: DEFAULT_COLUMNS }));
   };
 
   const visibleCount = columns.filter(c => c.visible).length;
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="flex items-center justify-center h-48">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card>
@@ -118,6 +151,7 @@ export const ColumnSettingsManager = () => {
               <CardTitle>Column Settings</CardTitle>
               <CardDescription className="mt-1">
                 {visibleCount} of {columns.length} columns visible
+                {isAuthenticated && <span className="block text-xs">Settings sync across devices</span>}
               </CardDescription>
             </div>
           </div>
@@ -126,8 +160,10 @@ export const ColumnSettingsManager = () => {
               <RotateCcw className="h-4 w-4 mr-2" />
               Reset
             </Button>
-            <Button size="sm" onClick={saveSettings} disabled={!hasChanges}>
-              {hasChanges ? (
+            <Button size="sm" onClick={saveSettings} disabled={!hasChanges || isSaving}>
+              {isSaving ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : hasChanges ? (
                 <>
                   <Save className="h-4 w-4 mr-2" />
                   Save Changes
@@ -199,14 +235,7 @@ export const ColumnSettingsManager = () => {
   );
 };
 
+// Export helper to get column settings - returns defaults (actual settings come from hook)
 export const getColumnSettings = (): ColumnConfig[] => {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) {
-    try {
-      return JSON.parse(saved).sort((a: ColumnConfig, b: ColumnConfig) => a.order - b.order);
-    } catch {
-      return DEFAULT_COLUMNS;
-    }
-  }
-  return DEFAULT_COLUMNS;
+  return [...DEFAULT_COLUMNS].sort((a, b) => a.order - b.order);
 };

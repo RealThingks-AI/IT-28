@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { BackButton } from "@/components/BackButton";
 import { Mail, ArrowLeft, ShieldCheck } from "lucide-react";
+import appLogo from "@/assets/app-logo.png";
 
 const PasswordReset = () => {
   const [email, setEmail] = useState("");
@@ -75,7 +76,7 @@ const PasswordReset = () => {
           <Card className="p-6">
             <div className="text-center mb-6">
               <div className="flex items-center justify-center mb-3">
-                <span className="text-2xl font-bold text-primary">RT-IT-Hub</span>
+                <img src={appLogo} alt="RT-IT-Hub" className="w-12 h-12" />
               </div>
               <h1 className="text-2xl font-bold mb-2">Request Password Reset</h1>
               <p className="text-sm text-muted-foreground">

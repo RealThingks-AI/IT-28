@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { useOrganisation } from "@/contexts/OrganisationContext";
 import { BackButton } from "@/components/BackButton";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,7 +25,6 @@ interface POItem {
 
 const CreatePO = () => {
   const navigate = useNavigate();
-  const { organisation } = useOrganisation();
   const queryClient = useQueryClient();
 
   const [vendorId, setVendorId] = useState("");
@@ -36,19 +34,16 @@ const CreatePO = () => {
   ]);
 
   const { data: vendors = [] } = useQuery<Array<{ id: string; name: string }>>({
-    queryKey: ["itam-vendors", organisation?.id],
+    queryKey: ["itam-vendors"],
     queryFn: async () => {
-      if (!organisation?.id) return [];
-      // @ts-ignore - type inference depth issue
+      // @ts-ignore - Bypass deep type inference issue
       const { data } = await supabase
         .from("itam_vendors")
         .select("id, name")
-        .eq("organisation_id", organisation.id)
         .eq("is_deleted", false)
         .order("name");
       return (data || []) as Array<{ id: string; name: string }>;
     },
-    enabled: !!organisation?.id,
   });
 
   const createPO = useMutation({
@@ -82,7 +77,6 @@ const CreatePO = () => {
         ...data,
         po_number: poNumber,
         tenant_id: tenantId,
-        organisation_id: organisation?.id,
         created_by: user.id,
         status: "draft",
       });

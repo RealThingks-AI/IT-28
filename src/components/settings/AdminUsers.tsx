@@ -34,12 +34,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Users, Search, UserPlus, Pencil, MoreHorizontal, UserX, KeyRound, ShieldCheck, Check, Trash2 } from "lucide-react";
+import { Users, Search, UserPlus, Pencil, MoreHorizontal, UserX, KeyRound, ShieldCheck, Check, Trash2, Upload } from "lucide-react";
 import { format } from "date-fns";
 import { SettingsLoadingSkeleton } from "./SettingsLoadingSkeleton";
 import { AddUserDialog } from "./AddUserDialog";
 import { EditUserDialog, UserToEdit } from "./EditUserDialog";
 import { ResetPasswordDialog } from "./ResetPasswordDialog";
+import { BulkImportUsersDialog } from "./BulkImportUsersDialog";
 import { normalizeRole, getUserInitials, type AppRole } from "@/lib/userUtils";
 
 interface User {
@@ -76,6 +77,7 @@ const getStatusColor = (status: string | null) => {
 export function AdminUsers() {
   const [search, setSearch] = useState("");
   const [addUserOpen, setAddUserOpen] = useState(false);
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [editUserOpen, setEditUserOpen] = useState(false);
   const [resetPasswordOpen, setResetPasswordOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<UserToEdit | null>(null);
@@ -294,8 +296,7 @@ export function AdminUsers() {
   return (
     <>
       <SettingsCard
-        title="User Directory"
-        description="Manage users and their roles within your organization"
+        title=""
       >
         <div className="space-y-3">
           {/* Search + Add User inline */}
@@ -309,10 +310,16 @@ export function AdminUsers() {
                 className="pl-9 h-9"
               />
             </div>
-            <Button size="sm" className="ml-auto" onClick={() => setAddUserOpen(true)}>
-              <UserPlus className="h-4 w-4 mr-2" />
-              Add User
-            </Button>
+            <div className="ml-auto flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => setBulkImportOpen(true)}>
+                <Upload className="h-4 w-4 mr-2" />
+                Bulk Import
+              </Button>
+              <Button size="sm" onClick={() => setAddUserOpen(true)}>
+                <UserPlus className="h-4 w-4 mr-2" />
+                Add User
+              </Button>
+            </div>
           </div>
 
           {/* Table */}
@@ -460,6 +467,7 @@ export function AdminUsers() {
 
       {/* Add User Dialog */}
       <AddUserDialog open={addUserOpen} onOpenChange={setAddUserOpen} />
+      <BulkImportUsersDialog open={bulkImportOpen} onOpenChange={setBulkImportOpen} />
 
       {/* Edit User Dialog */}
       <EditUserDialog

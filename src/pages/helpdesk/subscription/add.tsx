@@ -60,7 +60,7 @@ const AddSubscription = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["subscriptions-list"] });
       toast.success("Subscription added successfully");
-      navigate("/helpdesk/subscription/list");
+      navigate("/subscription/tools");
     },
     onError: (error: any) => {
       toast.error(error.message || "Failed to add subscription");
@@ -218,7 +218,7 @@ const AddSubscription = () => {
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => navigate("/helpdesk/subscription/list")}
+                  onClick={() => navigate("/subscription/tools")}
                 >
                   Cancel
                 </Button>

@@ -130,19 +130,19 @@ export default function TicketDetail() {
   });
 
   const { data: availableProblems = [] } = useQuery({
-    queryKey: ["helpdesk-problems-for-link", ticket?.organisation_id],
+    queryKey: ["helpdesk-problems-for-link", ticket?.tenant_id],
     queryFn: async () => {
-      if (!ticket?.organisation_id) return [];
+      if (!ticket) return [];
+      // @ts-ignore - Bypass complex type inference
       const { data, error } = await supabase
         .from("helpdesk_problems")
         .select("id, problem_number, title, status")
-        .eq("organisation_id", ticket.organisation_id)
         .eq("is_deleted", false)
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data || [];
     },
-    enabled: !!ticket?.organisation_id,
+    enabled: !!ticket,
   });
 
   const { data: currentUser } = useQuery({
@@ -153,11 +153,11 @@ export default function TicketDetail() {
 
       const { data } = await supabase
         .from("users")
-        .select("id, organisation_id")
+        .select("id")
         .eq("auth_user_id", user.id)
         .single();
 
-      return data;
+      return data ? { ...data, authUserId: user.id } : null;
     },
   });
 
@@ -255,9 +255,9 @@ export default function TicketDetail() {
 
       const { data: problemNumber } = await supabase.rpc("generate_problem_number", {
         p_tenant_id: ticket.tenant_id,
-        p_org_id: ticket.organisation_id,
       });
 
+      // @ts-ignore - Bypass complex type inference
       const { data: newProblem, error: problemError } = await supabase
         .from("helpdesk_problems")
         .insert({
@@ -267,7 +267,6 @@ export default function TicketDetail() {
           priority: ticket.priority,
           status: "investigating",
           tenant_id: ticket.tenant_id,
-          organisation_id: ticket.organisation_id,
           created_by: currentUser.id,
           category_id: ticket.category_id,
         })
@@ -816,10 +815,7 @@ export default function TicketDetail() {
           {/* Right Sidebar */}
           <div className="w-72 shrink-0 space-y-3 hidden lg:block">
             <TimeTrackingPanel ticketId={parseInt(ticketId!)} />
-            <TicketWatchersPanel 
-              ticketId={parseInt(ticketId!)} 
-              organisationId={ticket.organisation_id} 
-            />
+            <TicketWatchersPanel ticketId={parseInt(ticketId!)} />
           </div>
         </div>
       </div>

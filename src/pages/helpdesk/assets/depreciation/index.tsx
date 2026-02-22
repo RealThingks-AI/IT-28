@@ -10,7 +10,7 @@ export default function DepreciationDashboard() {
     <div className="min-h-screen bg-background">
       <div className="border-b px-4 py-3">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => navigate("/assets/setup")}>
+          <Button variant="ghost" size="icon" onClick={() => navigate("/assets/advanced")}>
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <h1 className="text-lg font-semibold">Depreciation Management</h1>

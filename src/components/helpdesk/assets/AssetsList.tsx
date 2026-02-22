@@ -1,48 +1,148 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
-import { getAssetColumnSettings, AssetColumn } from "./AssetColumnSettings";
+import { SYSTEM_COLUMN_ORDER } from "./AssetColumnSettings";
 import { AssetPhotoPreview } from "./AssetPhotoPreview";
+import { AssetActionsMenu } from "./AssetActionsMenu";
+import { useUISettings } from "@/hooks/useUISettings";
+import { ASSET_STATUS } from "@/lib/assetStatusUtils";
 
 interface AssetsListProps {
   filters?: Record<string, any>;
   onSelectionChange?: (selectedIds: string[], actions: any) => void;
+  onDataLoad?: (data: any[]) => void;
+  showSelection?: boolean;
 }
 
 type SortDirection = "asc" | "desc" | null;
 type SortColumn = string | null;
 
-const PAGE_SIZE_OPTIONS = [25, 50, 100];
+const PAGE_SIZE_OPTIONS = [100, 250, 500, 1000];
+
+// Column minimum widths for proper spacing
+const COLUMN_MIN_WIDTHS: Record<string, string> = {
+  asset_tag: "min-w-[100px]",
+  category: "min-w-[90px]",
+  status: "min-w-[85px]",
+  make: "min-w-[80px]",
+  model: "min-w-[80px]",
+  serial_number: "min-w-[110px]",
+  assigned_to: "min-w-[100px]",
+  asset_configuration: "min-w-[130px]",
+  description: "min-w-[150px]",
+  cost: "min-w-[80px]",
+  purchase_date: "min-w-[100px]",
+  purchased_from: "min-w-[100px]",
+  location: "min-w-[80px]",
+  site: "min-w-[80px]",
+  department: "min-w-[90px]",
+  asset_classification: "min-w-[110px]",
+  asset_photo: "min-w-[60px]",
+  event_date: "min-w-[100px]",
+  event_due_date: "min-w-[100px]",
+  event_notes: "min-w-[140px]",
+  created_by: "min-w-[100px]",
+  created_at: "min-w-[100px]"
+};
+
+// Plain status labels (no pill styling)
+const STATUS_LABELS: Record<string, string> = {
+  available: "Available",
+  in_use: "In Use",
+  maintenance: "Maintenance",
+  retired: "Retired",
+  disposed: "Disposed",
+  lost: "Lost",
+};
 
 export function AssetsList({
   filters = {},
-  onSelectionChange
+  onSelectionChange,
+  onDataLoad,
+  showSelection = false
 }: AssetsListProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const [pageSize, setPageSize] = useState(500);
   const [sortColumn, setSortColumn] = useState<SortColumn>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
-  const [visibleColumns, setVisibleColumns] = useState<AssetColumn[]>([]);
 
-  // Load column settings - always sorted by order_index
+  // Load column settings from database via hook
+  const { assetColumns: savedColumns, uiSettings, updateUISettings } = useUISettings();
+
+  // Column widths state - loaded from DB, saved on resize
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+  const resizeRef = useRef<{ col: string; startX: number; startW: number } | null>(null);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Load saved column widths from UI settings
   useEffect(() => {
-    const columns = getAssetColumnSettings();
-    // Ensure columns are always sorted by order_index
-    setVisibleColumns(columns.sort((a, b) => a.order_index - b.order_index));
-  }, []);
+    const saved = (uiSettings as any)?.assetColumnWidths;
+    if (saved && typeof saved === 'object') {
+      setColumnWidths(saved);
+    }
+  }, [uiSettings]);
+
+  // Debounced save of column widths
+  const saveColumnWidths = useCallback((widths: Record<string, number>) => {
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(() => {
+      updateUISettings.mutate({ assetColumnWidths: widths } as any);
+    }, 500);
+  }, [updateUISettings]);
+
+  // Mouse handlers for column resize
+  const handleResizeStart = useCallback((e: React.MouseEvent, columnId: string, currentWidth: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    resizeRef.current = { col: columnId, startX: e.clientX, startW: currentWidth };
+
+    const handleMouseMove = (ev: MouseEvent) => {
+      if (!resizeRef.current) return;
+      const diff = ev.clientX - resizeRef.current.startX;
+      const newWidth = Math.max(60, resizeRef.current.startW + diff);
+      setColumnWidths(prev => {
+        const updated = { ...prev, [resizeRef.current!.col]: newWidth };
+        return updated;
+      });
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      // Save after resize ends
+      setColumnWidths(prev => {
+        saveColumnWidths(prev);
+        return prev;
+      });
+      resizeRef.current = null;
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  }, [saveColumnWidths]);
+
+  // Merge saved visibility with system column order
+  const visibleColumns = useMemo(() => {
+    if (savedColumns && savedColumns.length > 0) {
+      return SYSTEM_COLUMN_ORDER.map((systemCol) => {
+        const savedCol = savedColumns.find((c) => c.id === systemCol.id);
+        return savedCol ? { ...systemCol, visible: savedCol.visible } : systemCol;
+      }).sort((a, b) => a.order_index - b.order_index);
+    }
+    return [...SYSTEM_COLUMN_ORDER].sort((a, b) => a.order_index - b.order_index);
+  }, [savedColumns]);
 
   // Reset page when filters change
   useEffect(() => {
@@ -53,10 +153,10 @@ export function AssetsList({
   const { data: totalCount = 0 } = useQuery({
     queryKey: ["helpdesk-assets-count", filters],
     queryFn: async () => {
-      let query = supabase
-        .from("itam_assets")
-        .select("id", { count: "exact", head: true })
-        .eq("is_active", true);
+      let query = supabase.
+      from("itam_assets").
+      select("id", { count: "exact", head: true }).
+      eq("is_active", true);
 
       if (filters.search) {
         query = query.or(
@@ -74,7 +174,7 @@ export function AssetsList({
       if (error) throw error;
       return count || 0;
     },
-    staleTime: 30000,
+    staleTime: 30000
   });
 
   // Fetch paginated assets with related data
@@ -84,19 +184,18 @@ export function AssetsList({
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
 
-      let query = supabase
-        .from("itam_assets")
-        .select(`
+      let query = supabase.
+      from("itam_assets").
+      select(`
           *,
           category:itam_categories(id, name),
           location:itam_locations(id, name, site:itam_sites(id, name)),
           department:itam_departments(id, name),
           make:itam_makes(id, name),
-          vendor:itam_vendors(id, name),
-          creator:users!itam_assets_created_by_fkey(id, name)
-        `)
-        .eq("is_active", true)
-        .range(from, to);
+          vendor:itam_vendors(id, name)
+        `).
+      eq("is_active", true).
+      range(from, to);
 
       if (filters.search) {
         query = query.or(
@@ -156,17 +255,47 @@ export function AssetsList({
       if (error) throw error;
       return data || [];
     },
-    staleTime: 30000,
+    staleTime: 30000
   });
+
+  // Fetch users for assigned_to lookup
+  const { data: usersData = [] } = useQuery({
+    queryKey: ["users-for-assets-list"],
+    queryFn: async () => {
+      const { data } = await supabase.from("users").select("id, name, email");
+      return data || [];
+    },
+    staleTime: 60000
+  });
+
+  // Helper to get user name by ID or return original value if not a UUID
+  const getUserName = (assignedTo: string | null) => {
+    if (!assignedTo) return null;
+    // Check if it looks like a UUID
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (uuidRegex.test(assignedTo)) {
+      const user = usersData.find((u) => u.id === assignedTo);
+      return user?.name || user?.email || null;
+    }
+    // Return as-is if it's already a name
+    return assignedTo;
+  };
+
+  // Notify parent when data changes (for export)
+  useEffect(() => {
+    if (onDataLoad && assets.length > 0) {
+      onDataLoad(assets);
+    }
+  }, [assets, onDataLoad]);
 
   const totalPages = Math.ceil(totalCount / pageSize);
 
   const updateStatus = useMutation({
-    mutationFn: async ({ ids, status }: { ids: string[]; status: string }) => {
-      const { error } = await supabase
-        .from("itam_assets")
-        .update({ status })
-        .in("id", ids);
+    mutationFn: async ({ ids, status }: {ids: string[];status: string;}) => {
+      const { error } = await supabase.
+      from("itam_assets").
+      update({ status }).
+      in("id", ids);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -174,15 +303,15 @@ export function AssetsList({
       queryClient.invalidateQueries({ queryKey: ["helpdesk-assets-count"] });
       toast.success("Assets updated");
       setSelectedIds([]);
-    },
+    }
   });
 
   const deleteAssets = useMutation({
     mutationFn: async (ids: string[]) => {
-      const { error } = await supabase
-        .from("itam_assets")
-        .update({ is_active: false })
-        .in("id", ids);
+      const { error } = await supabase.
+      from("itam_assets").
+      update({ is_active: false }).
+      in("id", ids);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -190,29 +319,29 @@ export function AssetsList({
       queryClient.invalidateQueries({ queryKey: ["helpdesk-assets-count"] });
       toast.success("Assets deleted");
       setSelectedIds([]);
-    },
+    }
+  });
+
+  const createBulkActions = (ids: string[]) => ({
+    handleCheckOut: () => updateStatus.mutate({ ids, status: ASSET_STATUS.IN_USE }),
+    handleCheckIn: () => updateStatus.mutate({ ids, status: ASSET_STATUS.AVAILABLE }),
+    handleMaintenance: () => updateStatus.mutate({ ids, status: ASSET_STATUS.MAINTENANCE }),
+    handleDispose: () => updateStatus.mutate({ ids, status: ASSET_STATUS.DISPOSED }),
+    handleDelete: () => deleteAssets.mutate(ids)
   });
 
   const handleSelectAll = (checked: boolean) => {
     const newSelected = checked ? assets.map((a: any) => a.id) : [];
     setSelectedIds(newSelected);
-    onSelectionChange?.(newSelected, bulkActions);
+    onSelectionChange?.(newSelected, createBulkActions(newSelected));
   };
 
   const handleSelectOne = (id: string, checked: boolean) => {
-    const newSelected = checked
-      ? [...selectedIds, id]
-      : selectedIds.filter((sid) => sid !== id);
+    const newSelected = checked ?
+    [...selectedIds, id] :
+    selectedIds.filter((sid) => sid !== id);
     setSelectedIds(newSelected);
-    onSelectionChange?.(newSelected, bulkActions);
-  };
-
-  const bulkActions = {
-    handleCheckOut: () => updateStatus.mutate({ ids: selectedIds, status: "in_use" }),
-    handleCheckIn: () => updateStatus.mutate({ ids: selectedIds, status: "available" }),
-    handleMaintenance: () => updateStatus.mutate({ ids: selectedIds, status: "maintenance" }),
-    handleDispose: () => updateStatus.mutate({ ids: selectedIds, status: "disposed" }),
-    handleDelete: () => deleteAssets.mutate(selectedIds),
+    onSelectionChange?.(newSelected, createBulkActions(newSelected));
   };
 
   const handleSort = (column: string) => {
@@ -229,33 +358,18 @@ export function AssetsList({
     }
   };
 
-  const getStatusBadge = (status: string) => {
-    const variants: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-      available: "default",
-      in_use: "secondary",
-      maintenance: "outline",
-      retired: "destructive",
-      disposed: "destructive",
-      lost: "destructive",
-    };
-    const labels: Record<string, string> = {
-      available: "Available",
-      in_use: "In Use",
-      maintenance: "Maintenance",
-      retired: "Retired",
-      disposed: "Disposed",
-      lost: "Lost",
-    };
-    return (
-      <Badge variant={variants[status] || "secondary"}>
-        {labels[status] || status?.replace("_", " ") || "Unknown"}
-      </Badge>
-    );
-  };
-
-  const formatCurrency = (amount: number | null) => {
+  const formatCurrency = (amount: number | null, asset?: any) => {
     if (amount === null || amount === undefined) return "—";
-    return `₹${amount.toLocaleString("en-IN")}`;
+    const currency = asset?.custom_fields?.currency || "INR";
+    const currencySymbols: Record<string, string> = {
+      INR: "₹",
+      USD: "$",
+      EUR: "€",
+      GBP: "£"
+    };
+    const symbol = currencySymbols[currency] || "₹";
+    const locale = currency === "INR" ? "en-IN" : "en-US";
+    return `${symbol}${amount.toLocaleString(locale)}`;
   };
 
   const formatDate = (dateStr: string | null) => {
@@ -267,12 +381,18 @@ export function AssetsList({
     }
   };
 
-  // Get visible columns - sorted by order_index (fixed positions)
-  const activeColumns = visibleColumns
-    .filter((c) => c.visible)
-    .sort((a, b) => a.order_index - b.order_index);
+  // Get sort indicator for column header
+  const getSortIndicator = (columnId: string) => {
+    if (sortColumn !== columnId) return null;
+    return sortDirection === "asc" ? " ▲" : " ▼";
+  };
 
-  // Render cell based on column ID
+  // Get visible columns - sorted by order_index (fixed positions)
+  const activeColumns = visibleColumns.
+  filter((c) => c.visible).
+  sort((a, b) => a.order_index - b.order_index);
+
+  // Render cell based on column ID - no bold text, plain status
   const renderCell = (asset: any, columnId: string) => {
     const customFields = asset.custom_fields || {};
 
@@ -280,68 +400,69 @@ export function AssetsList({
       case "asset_photo":
         const photoUrl = customFields.photo_url;
         return (
-          <AssetPhotoPreview 
-            photoUrl={photoUrl} 
-            assetName={asset.name || asset.asset_tag} 
-          />
-        );
+          <AssetPhotoPreview
+            photoUrl={photoUrl}
+            assetName={asset.name || asset.asset_tag} />);
+
+
 
       case "asset_tag":
-        return <span className="font-medium">{asset.asset_tag || "—"}</span>;
+        // Hide raw UUIDs — only show human-readable asset tags
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(asset.asset_tag || "");
+        return (
+          <span className="text-primary hover:underline cursor-pointer">
+            {(!asset.asset_tag || isUuid) ? "—" : asset.asset_tag}
+          </span>);
+
 
       case "make":
-        return asset.make?.name || <span className="text-muted-foreground">—</span>;
+        return asset.make?.name || "—";
 
       case "cost":
-        return <span className="font-medium">{formatCurrency(asset.purchase_price)}</span>;
+        return formatCurrency(asset.purchase_price, asset);
 
       case "created_by":
-        return asset.creator?.name || <span className="text-muted-foreground">—</span>;
+        return getUserName(asset.created_by) || "—";
 
       case "created_at":
         return formatDate(asset.created_at);
 
       case "description":
-        return asset.description ? (
-          <span className="truncate max-w-[200px] block">{asset.description}</span>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        );
+        return asset.description || "—";
 
       case "model":
-        return asset.model || <span className="text-muted-foreground">—</span>;
+        return asset.model || "—";
 
       case "purchase_date":
         return formatDate(asset.purchase_date);
 
       case "purchased_from":
-        return asset.vendor?.name || <span className="text-muted-foreground">—</span>;
+        return asset.vendor?.name || "—";
 
       case "serial_number":
-        return asset.serial_number || <span className="text-muted-foreground">—</span>;
+        return asset.serial_number || "—";
 
       case "asset_classification":
-        const classification = customFields.classification;
-        return classification || <span className="text-muted-foreground">—</span>;
+        return customFields.classification || "—";
 
       case "asset_configuration":
-        const configuration = customFields.asset_configuration;
-        return configuration || <span className="text-muted-foreground">—</span>;
+        return customFields.asset_configuration || "—";
 
       case "category":
-        return asset.category?.name || <span className="text-muted-foreground">—</span>;
+        return asset.category?.name || "—";
 
       case "department":
-        return asset.department?.name || <span className="text-muted-foreground">—</span>;
+        return asset.department?.name || "—";
 
       case "location":
-        return asset.location?.name || <span className="text-muted-foreground">—</span>;
+        return asset.location?.name || "—";
 
       case "site":
-        return asset.location?.site?.name || <span className="text-muted-foreground">—</span>;
+        return asset.location?.site?.name || "—";
 
       case "assigned_to":
-        return asset.assigned_to || <span className="text-muted-foreground">—</span>;
+        // Look up user name if it's a UUID, otherwise display as-is
+        return getUserName(asset.assigned_to) || "—";
 
       case "event_date":
         return formatDate(asset.checked_out_at);
@@ -350,14 +471,24 @@ export function AssetsList({
         return formatDate(asset.expected_return_date);
 
       case "event_notes":
-        return asset.check_out_notes ? (
-          <span className="truncate max-w-[200px] block">{asset.check_out_notes}</span>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        );
+        return asset.check_out_notes || "—";
 
       case "status":
-        return getStatusBadge(asset.status);
+        const statusDotColor: Record<string, string> = {
+          available: "bg-green-500",
+          in_use: "bg-blue-500",
+          maintenance: "bg-amber-500",
+          retired: "bg-gray-400",
+          disposed: "bg-red-500",
+          lost: "bg-orange-500",
+        };
+        const dotColor = statusDotColor[asset.status] || "bg-gray-400";
+        return (
+          <span className="flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-sm shrink-0 ${dotColor}`} />
+            {STATUS_LABELS[asset.status] || asset.status?.replace("_", " ") || "—"}
+          </span>
+        );
 
       default:
         return "—";
@@ -367,86 +498,110 @@ export function AssetsList({
   if (isLoading) {
     return (
       <div className="space-y-2">
-        {[1, 2, 3, 4, 5].map((i) => (
-          <Skeleton key={i} className="h-12 w-full" />
-        ))}
-      </div>
-    );
+        {[1, 2, 3, 4, 5].map((i) =>
+        <Skeleton key={i} className="h-12 w-full" />
+        )}
+      </div>);
+
   }
 
   return (
-    <div className="space-y-2">
-      <div className="border rounded-lg overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-10">
-                <Checkbox
-                  checked={selectedIds.length === assets.length && assets.length > 0}
-                  onCheckedChange={handleSelectAll}
-                />
-              </TableHead>
-              {activeColumns.map((column) => (
-                <TableHead
-                  key={column.id}
-                  className={`cursor-pointer select-none hover:bg-muted/50 ${
-                    column.id === "cost" ? "text-right" : ""
-                  }`}
-                  onClick={() => handleSort(column.id)}
-                >
-                  <div
-                    className={`flex items-center ${
-                      column.id === "cost" ? "justify-end" : ""
-                    }`}
-                  >
-                    {column.label}
-                  </div>
+    <div className="flex flex-col h-full">
+      <div className="flex-1 overflow-auto rounded-md border">
+        <table className="w-full caption-bottom text-sm">
+          <TableHeader className="sticky top-0 z-10 bg-muted">
+            <TableRow className="border-b-2 border-border">
+              {showSelection && (
+                <TableHead className="w-8 whitespace-nowrap py-1 font-semibold">
+                  <Checkbox
+                    checked={selectedIds.length === assets.length && assets.length > 0}
+                    onCheckedChange={handleSelectAll} />
                 </TableHead>
-              ))}
+              )}
+              <TableHead className="w-12 whitespace-nowrap text-xs py-1 font-semibold">#</TableHead>
+              {activeColumns.map((column) => {
+                const w = columnWidths[column.id];
+                return (
+                  <TableHead
+                    key={column.id}
+                    className={`whitespace-nowrap cursor-pointer select-none hover:bg-muted/50 text-xs py-1 font-semibold relative group ${
+                    column.id === "cost" ? "text-right" : ""}`}
+                    style={w ? { width: w, minWidth: w } : undefined}
+                    onClick={() => handleSort(column.id)}>
+                    <div className={`flex items-center gap-1 ${column.id === "cost" ? "justify-end" : ""}`}>
+                      {column.label}
+                      {getSortIndicator(column.id) &&
+                        <span className="text-primary">{getSortIndicator(column.id)}</span>
+                      }
+                    </div>
+                    {/* Resize handle */}
+                    <div
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize opacity-0 group-hover:opacity-100 bg-border hover:bg-primary transition-opacity"
+                      onMouseDown={(e) => {
+                        const th = e.currentTarget.parentElement;
+                        handleResizeStart(e, column.id, th?.offsetWidth || 100);
+                      }}
+                    />
+                  </TableHead>
+                );
+              })}
+              <TableHead className="w-10 whitespace-nowrap text-xs py-1 font-semibold">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {assets.length === 0 ? (
-              <TableRow>
+            {assets.length === 0 ?
+            <TableRow>
                 <TableCell
-                  colSpan={activeColumns.length + 1}
-                  className="text-center text-muted-foreground py-8"
-                >
+                colSpan={activeColumns.length + 3}
+                className="text-center text-muted-foreground py-8">
+
                   No assets found
                 </TableCell>
-              </TableRow>
-            ) : (
-              assets.map((asset: any) => (
-                <TableRow
-                  key={asset.id}
-                  className="cursor-pointer hover:bg-muted/50"
-                  onClick={() => navigate(`/assets/detail/${asset.id}`)}
-                >
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    <Checkbox
-                      checked={selectedIds.includes(asset.id)}
-                      onCheckedChange={(checked) =>
-                        handleSelectOne(asset.id, checked as boolean)
-                      }
-                    />
+              </TableRow> :
+
+            assets.map((asset: any, index: number) =>
+            <TableRow
+              key={asset.id}
+              className="cursor-pointer hover:bg-muted/50 border-b border-border transition-colors"
+              onClick={() => navigate(`/assets/detail/${asset.id}`)}>
+
+                  {showSelection && (
+                    <TableCell onClick={(e) => e.stopPropagation()} className="whitespace-nowrap py-1">
+                      <Checkbox
+                        checked={selectedIds.includes(asset.id)}
+                        onCheckedChange={(checked) =>
+                          handleSelectOne(asset.id, checked as boolean)
+                        } />
+                    </TableCell>
+                  )}
+                  <TableCell className="whitespace-nowrap text-xs py-1 text-muted-foreground">
+                    {(page - 1) * pageSize + index + 1}
                   </TableCell>
-                  {activeColumns.map((column) => (
-                    <TableCell
-                      key={column.id}
-                      className={column.id === "cost" ? "text-right" : ""}
-                    >
+                  {activeColumns.map((column) => {
+                const w = columnWidths[column.id];
+                return (
+              <TableCell
+                key={column.id}
+                className={`whitespace-nowrap text-xs py-1 ${
+                column.id === "cost" ? "text-right" : ""}`}
+                style={w ? { width: w, minWidth: w, maxWidth: w, overflow: 'hidden', textOverflow: 'ellipsis' } : undefined}>
+
                       {renderCell(asset, column.id)}
                     </TableCell>
-                  ))}
+                );
+              })}
+                  <TableCell onClick={(e) => e.stopPropagation()} className="whitespace-nowrap py-1">
+                    <AssetActionsMenu asset={asset} />
+                  </TableCell>
                 </TableRow>
-              ))
-            )}
+            )
+            }
           </TableBody>
-        </Table>
+        </table>
       </div>
 
       {/* Sticky Bottom Pagination */}
-      <div className="sticky bottom-0 bg-background border-t px-6 py-2 flex items-center justify-between text-xs z-10 -mx-3 mt-4">
+      <div className="shrink-0 bg-background border-t px-6 py-2 flex items-center justify-between text-xs">
         <span className="text-muted-foreground">
           {assets.length === 0 ? 0 : (page - 1) * pageSize + 1}–
           {Math.min(page * pageSize, totalCount)} of {totalCount}
@@ -460,38 +615,38 @@ export function AssetsList({
               onValueChange={(value) => {
                 setPageSize(Number(value));
                 setPage(1);
-              }}
-            >
+              }}>
+
               <SelectTrigger className="w-[60px] h-7 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {PAGE_SIZE_OPTIONS.map((size) => (
-                  <SelectItem key={size} value={size.toString()}>
+                {PAGE_SIZE_OPTIONS.map((size) =>
+                <SelectItem key={size} value={size.toString()}>
                     {size}
                   </SelectItem>
-                ))}
+                )}
               </SelectContent>
             </Select>
           </div>
 
           <div className="flex items-center gap-0.5">
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-7 w-7"
-              onClick={() => setPage(1)}
-              disabled={page === 1}
-            >
-              <ChevronsLeft className="h-3.5 w-3.5" />
-            </Button>
+            
+
+
+
+
+
+
+
+
             <Button
               variant="outline"
               size="icon"
               className="h-7 w-7"
               onClick={() => setPage(page - 1)}
-              disabled={page === 1}
-            >
+              disabled={page === 1}>
+
               <ChevronLeft className="h-3.5 w-3.5" />
             </Button>
 
@@ -504,22 +659,22 @@ export function AssetsList({
               size="icon"
               className="h-7 w-7"
               onClick={() => setPage(page + 1)}
-              disabled={page >= totalPages}
-            >
+              disabled={page >= totalPages}>
+
               <ChevronRight className="h-3.5 w-3.5" />
             </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-7 w-7"
-              onClick={() => setPage(totalPages)}
-              disabled={page >= totalPages}
-            >
-              <ChevronsRight className="h-3.5 w-3.5" />
-            </Button>
+            
+
+
+
+
+
+
+
+
           </div>
         </div>
       </div>
-    </div>
-  );
+    </div>);
+
 }

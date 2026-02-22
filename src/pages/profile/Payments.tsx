@@ -1,13 +1,15 @@
 import { CreditCard, Receipt, ShieldAlert } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useOrganisation } from "@/contexts/OrganisationContext";
 import { useRole } from "@/hooks/useRole";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
+/**
+ * Simplified Payments page for single-company internal use.
+ * Removed organisation/plan checks.
+ */
 const Payments = () => {
   const { user } = useAuth();
-  const { organisation } = useOrganisation();
   const { isAdmin, accountType } = useRole();
 
   // Check if user has permission to view payments
@@ -23,13 +25,13 @@ const Payments = () => {
         </p>
       </div>
 
-      {/* Access Denied for non-admins in organization accounts */}
+      {/* Access Denied for non-admins */}
       {!hasAccess && (
         <Alert variant="destructive" className="border-destructive/50 bg-destructive/5">
           <ShieldAlert className="h-5 w-5" />
           <AlertTitle className="text-lg font-semibold">Access Denied</AlertTitle>
           <AlertDescription className="mt-2">
-            You don't have permission to view billing information. Please contact your Organization Admin for billing access.
+            You don't have permission to view billing information. Please contact your administrator for billing access.
           </AlertDescription>
         </Alert>
       )}
@@ -48,7 +50,7 @@ const Payments = () => {
             <CardContent className="pt-2">
               <div className="text-center py-8">
                 <p className="text-muted-foreground mb-4">
-                  Subscription management is not yet configured for this organization.
+                  Subscription management is not yet configured.
                 </p>
                 <p className="text-sm text-muted-foreground">
                   Contact your administrator to set up billing.

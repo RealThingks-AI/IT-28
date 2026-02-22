@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { 
@@ -26,7 +25,6 @@ import {
 import { Plus, Edit2, Trash2, Loader2, FolderTree, Search } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
-import { useOrganisation } from "@/contexts/OrganisationContext";
 
 interface Category {
   id: number;
@@ -40,7 +38,6 @@ interface Category {
 export const CategoriesManager = () => {
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const { organisation } = useOrganisation();
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
@@ -98,7 +95,6 @@ export const CategoriesManager = () => {
           description: data.description || null,
           is_active: data.is_active,
           tenant_id: currentUser.tenant_id,
-          organisation_id: organisation?.id,
         });
         if (error) throw error;
       }

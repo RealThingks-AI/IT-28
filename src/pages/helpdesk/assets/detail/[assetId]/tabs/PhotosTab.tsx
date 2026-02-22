@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Image, Upload, X, ZoomIn } from "lucide-react";
+import { Image, Upload, X, ZoomIn, Loader2 } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { toast } from "sonner";
 
@@ -9,13 +11,55 @@ interface PhotosTabProps {
   assetId: string;
 }
 
-// Note: This is a local-only implementation since there's no itam_asset_photos table.
-// In production, you'd want to create a table or use Supabase storage with metadata.
+interface PhotoMeta {
+  url: string;
+  name: string;
+  uploaded_at: string;
+}
 
 export const PhotosTab = ({ assetId }: PhotosTabProps) => {
-  const [photos, setPhotos] = useState<string[]>([]);
+  const queryClient = useQueryClient();
   const [uploading, setUploading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  // Fetch photos from Supabase storage
+  const { data: photos = [], isLoading, refetch } = useQuery({
+    queryKey: ["asset-photos", assetId],
+    queryFn: async () => {
+      // List files in the asset's folder
+      const { data: files, error } = await supabase.storage
+        .from("asset-photos")
+        .list(assetId, {
+          limit: 100,
+          sortBy: { column: "created_at", order: "desc" },
+        });
+
+      if (error) {
+        console.error("Error fetching photos:", error);
+        return [];
+      }
+
+      if (!files || files.length === 0) return [];
+
+      // Get public URLs for each file
+      const photoUrls = files
+        .filter(file => file.name !== ".emptyFolderPlaceholder")
+        .map(file => {
+          const { data } = supabase.storage
+            .from("asset-photos")
+            .getPublicUrl(`${assetId}/${file.name}`);
+          
+          return {
+            url: data.publicUrl,
+            name: file.name,
+            uploaded_at: file.created_at || "",
+          };
+        });
+
+      return photoUrls as PhotoMeta[];
+    },
+    enabled: !!assetId,
+  });
 
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -35,32 +79,62 @@ export const PhotosTab = ({ assetId }: PhotosTabProps) => {
 
     setUploading(true);
     try {
-      // Create local preview URL
-      const url = URL.createObjectURL(file);
-      setPhotos([...photos, url]);
-      toast.success("Photo added");
+      // Generate unique filename
+      const ext = file.name.split(".").pop();
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
+      const filePath = `${assetId}/${fileName}`;
+
+      // Upload to Supabase storage
+      const { error: uploadError } = await supabase.storage
+        .from("asset-photos")
+        .upload(filePath, file, {
+          cacheControl: "3600",
+          upsert: false,
+        });
+
+      if (uploadError) throw uploadError;
+
+      toast.success("Photo uploaded successfully");
+      refetch();
       
-      // In production, you'd upload to Supabase storage here:
-      // const { error } = await supabase.storage
-      //   .from("asset-photos")
-      //   .upload(`${assetId}/${file.name}`, file);
-      
-    } catch (error) {
-      toast.error("Failed to upload photo");
+      // Reset the file input
+      event.target.value = "";
+    } catch (error: any) {
+      console.error("Upload error:", error);
+      toast.error(error.message || "Failed to upload photo");
     } finally {
       setUploading(false);
     }
   };
 
-  const handleRemove = (index: number) => {
-    const newPhotos = photos.filter((_, i) => i !== index);
-    URL.revokeObjectURL(photos[index]); // Clean up URL
-    setPhotos(newPhotos);
-    toast.success("Photo removed");
+  const handleRemove = async (fileName: string) => {
+    try {
+      const { error } = await supabase.storage
+        .from("asset-photos")
+        .remove([`${assetId}/${fileName}`]);
+
+      if (error) throw error;
+
+      toast.success("Photo removed");
+      refetch();
+    } catch (error: any) {
+      console.error("Remove error:", error);
+      toast.error(error.message || "Failed to remove photo");
+    }
   };
 
+  if (isLoading) {
+    return (
+      <Card className="h-full">
+        <CardContent className="p-4 flex items-center justify-center">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
-    <Card>
+    <Card className="h-full">
       <CardContent className="p-4">
         <div className="space-y-3">
           <div className="relative">
@@ -73,8 +147,17 @@ export const PhotosTab = ({ assetId }: PhotosTabProps) => {
               disabled={uploading}
             />
             <Button variant="outline" size="sm" className="w-full" disabled={uploading}>
-              <Upload className="h-4 w-4 mr-2" />
-              {uploading ? "Uploading..." : "Upload Photo"}
+              {uploading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Uploading...
+                </>
+              ) : (
+                <>
+                  <Upload className="h-4 w-4 mr-2" />
+                  Upload Photo
+                </>
+              )}
             </Button>
           </div>
 
@@ -86,19 +169,23 @@ export const PhotosTab = ({ assetId }: PhotosTabProps) => {
             </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {photos.map((url, index) => (
-                <div key={index} className="relative group aspect-square">
+              {photos.map((photo, index) => (
+                <div key={photo.name} className="relative group aspect-square">
                   <img
-                    src={url}
+                    src={photo.url}
                     alt={`Asset photo ${index + 1}`}
                     className="w-full h-full object-cover rounded-lg border"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.src = "/placeholder.svg";
+                    }}
                   />
                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
                     <Button
                       variant="secondary"
                       size="icon"
                       className="h-8 w-8"
-                      onClick={() => setPreviewUrl(url)}
+                      onClick={() => setPreviewUrl(photo.url)}
                     >
                       <ZoomIn className="h-4 w-4" />
                     </Button>
@@ -106,7 +193,7 @@ export const PhotosTab = ({ assetId }: PhotosTabProps) => {
                       variant="destructive"
                       size="icon"
                       className="h-8 w-8"
-                      onClick={() => handleRemove(index)}
+                      onClick={() => handleRemove(photo.name)}
                     >
                       <X className="h-4 w-4" />
                     </Button>

@@ -19,24 +19,17 @@ import {
 import { format, subDays, startOfDay, eachDayOfInterval } from "date-fns";
 import { Skeleton } from "@/components/ui/skeleton";
 
-const PRIORITY_COLORS = {
-  urgent: "hsl(var(--destructive))",
-  high: "#f97316",
-  medium: "#eab308",
-  low: "#22c55e",
-};
+import { CHART_STATUS_COLORS, CHART_PRIORITY_COLORS } from "@/lib/statusConfig";
 
-const STATUS_COLORS = {
-  open: "#3b82f6",
-  in_progress: "#8b5cf6",
-  on_hold: "#f97316",
-  resolved: "#22c55e",
-  closed: "#6b7280",
-};
+const PRIORITY_COLORS = CHART_PRIORITY_COLORS;
+
+const STATUS_COLORS = CHART_STATUS_COLORS;
 
 export function DashboardCharts() {
   const { data: chartData, isLoading } = useQuery({
     queryKey: ["dashboard-charts"],
+    staleTime: 5 * 60 * 1000,  // 5 minutes - charts don't need real-time updates
+    gcTime: 10 * 60 * 1000,    // 10 minutes cache retention
     queryFn: async () => {
       const thirtyDaysAgo = subDays(new Date(), 30);
       

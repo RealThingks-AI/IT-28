@@ -61,7 +61,7 @@ export function CreateTicketForm({ onSearchChange }: CreateTicketFormProps) {
 
       const { data: userData } = await supabase
         .from("users")
-        .select("id, organisation_id")
+        .select("id")
         .eq("auth_user_id", user.id)
         .single();
 
@@ -73,13 +73,10 @@ export function CreateTicketForm({ onSearchChange }: CreateTicketFormProps) {
         .eq("id", user.id)
         .maybeSingle();
 
-      const { data: orgFromFunction } = await supabase.rpc("get_user_org");
-
       return {
         id: userData.id,
-        organisation_id: orgFromFunction || userData.organisation_id,
-        tenant_id: profileData?.tenant_id,
-        profileTenantId: profileData?.tenant_id,
+        tenant_id: profileData?.tenant_id || 1,
+        authUserId: user.id,
       };
     },
   });
@@ -88,13 +85,11 @@ export function CreateTicketForm({ onSearchChange }: CreateTicketFormProps) {
     mutationFn: async (data: TicketFormData) => {
       if (!currentUser) throw new Error("User not found");
 
-      // Use tenant_id if available, otherwise default to 1 for org users
-      const tenantId = currentUser.profileTenantId || currentUser.tenant_id || 1;
+      const tenantId = currentUser.tenant_id || 1;
 
-      // Generate ticket number per-tenant (ignore organisation to avoid collisions across orgs)
+      // Generate ticket number per-tenant
       const { data: ticketNumber } = await supabase.rpc("generate_helpdesk_ticket_number", {
         p_tenant_id: tenantId,
-        p_org_id: null as any,
       });
 
       // Insert ticket
@@ -109,7 +104,6 @@ export function CreateTicketForm({ onSearchChange }: CreateTicketFormProps) {
           status: "open",
           requester_id: currentUser.id,
           tenant_id: tenantId,
-          organisation_id: currentUser.organisation_id,
         })
         .select()
         .single();
@@ -135,16 +129,10 @@ export function CreateTicketForm({ onSearchChange }: CreateTicketFormProps) {
   // Watch title and description for KB suggestions
   const title = form.watch("title");
   const description = form.watch("description");
-
-  // Debounced search for KB suggestions
-  import("react").then(({ useEffect }) => {
-    // Note: This is handled by the parent component now
-  });
   
   // Notify parent of search changes
   const searchQuery = `${title} ${description}`.trim();
   if (onSearchChange && searchQuery.length > 3) {
-    // Debounce handled by parent
     onSearchChange(searchQuery);
   }
 

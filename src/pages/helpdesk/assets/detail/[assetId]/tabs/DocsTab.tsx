@@ -42,7 +42,18 @@ export const DocsTab = ({ assetId }: DocsTabProps) => {
   });
 
   const deleteDocument = useMutation({
-    mutationFn: async (docId: string) => {
+    mutationFn: async ({ docId, filePath }: { docId: string; filePath: string }) => {
+      // First delete from storage
+      const { error: storageError } = await supabase.storage
+        .from("asset-documents")
+        .remove([filePath]);
+      
+      if (storageError) {
+        console.warn("Failed to delete file from storage:", storageError);
+        // Continue with DB deletion even if storage deletion fails
+      }
+
+      // Then delete the database record
       const { error } = await supabase
         .from("itam_asset_documents")
         .delete()
@@ -211,7 +222,7 @@ export const DocsTab = ({ assetId }: DocsTabProps) => {
                       variant="ghost"
                       size="icon"
                       className="h-8 w-8 text-destructive hover:text-destructive"
-                      onClick={() => deleteDocument.mutate(doc.id)}
+                      onClick={() => deleteDocument.mutate({ docId: doc.id, filePath: doc.file_path })}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>

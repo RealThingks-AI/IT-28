@@ -9,7 +9,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { useOrganisation } from "@/contexts/OrganisationContext";
 import { useQueryClient } from "@tanstack/react-query";
 
 const formSchema = z.object({
@@ -28,7 +27,6 @@ interface AddVendorDialogProps {
 
 export const AddVendorDialog = ({ open, onOpenChange, onSuccess }: AddVendorDialogProps) => {
   const { toast } = useToast();
-  const { organisation } = useOrganisation();
   const queryClient = useQueryClient();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -47,7 +45,6 @@ export const AddVendorDialog = ({ open, onOpenChange, onSuccess }: AddVendorDial
     setIsSubmitting(true);
     try {
       const { error } = await supabase.from("subscriptions_vendors").insert({
-        organisation_id: organisation?.id!,
         name: values.name,
         contact_email: values.contact_email || null,
         contact_phone: values.contact_phone || null,

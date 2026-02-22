@@ -8,10 +8,9 @@ import { Link } from "react-router-dom";
 interface SimilarTicketsProps {
   ticketId: number;
   title: string;
-  organisationId?: string;
 }
 
-export const SimilarTickets = ({ ticketId, title, organisationId }: SimilarTicketsProps) => {
+export const SimilarTickets = ({ ticketId, title }: SimilarTicketsProps) => {
   const { data: similarTickets = [] } = useQuery({
     queryKey: ["similar-tickets", ticketId, title],
     queryFn: async () => {
@@ -26,21 +25,14 @@ export const SimilarTickets = ({ ticketId, title, organisationId }: SimilarTicke
 
       if (keywords.length === 0) return [];
 
-      // Build search query
-      const searchPattern = keywords.join(" | ");
-
-      let query = supabase
+      // Single-company mode: RLS handles access control, no org filter needed
+      const { data, error } = await supabase
         .from("helpdesk_tickets")
         .select("id, ticket_number, title, status, priority, resolved_at")
         .neq("id", ticketId)
         .eq("is_deleted", false)
-        .or(`title.ilike.%${keywords[0]}%,description.ilike.%${keywords[0]}%`);
-
-      if (organisationId) {
-        query = query.eq("organisation_id", organisationId);
-      }
-
-      const { data, error } = await query.limit(5);
+        .or(`title.ilike.%${keywords[0]}%,description.ilike.%${keywords[0]}%`)
+        .limit(5);
 
       if (error) throw error;
 

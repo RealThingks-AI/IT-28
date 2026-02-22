@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -31,23 +31,13 @@ export function TagFormatTab() {
   const [prefix, setPrefix] = useState("");
   const [padding, setPadding] = useState(4);
 
-  // Fetch categories
+  // Fetch categories - no org filter needed in single-company mode
   const { data: categories = [] } = useQuery({
     queryKey: ["itam-categories"],
     queryFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return [];
-      
-      const { data: userData } = await supabase
-        .from("users")
-        .select("organisation_id")
-        .eq("auth_user_id", user.id)
-        .single();
-      
       const { data, error } = await supabase
         .from("itam_categories")
         .select("id, name")
-        .eq("organisation_id", userData?.organisation_id)
         .order("name");
       
       if (error) throw error;
@@ -91,15 +81,6 @@ export function TagFormatTab() {
     mutationFn: async () => {
       if (!selectedCategory) throw new Error("No category selected");
       
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
-      
-      const { data: userData } = await supabase
-        .from("users")
-        .select("organisation_id")
-        .eq("auth_user_id", user.id)
-        .single();
-      
       const existing = getTagFormatForCategory(selectedCategory.id);
       
       if (existing) {
@@ -114,7 +95,7 @@ export function TagFormatTab() {
         
         if (error) throw error;
       } else {
-        // Insert new
+        // Insert new - no org filter needed
         const { error } = await supabase
           .from("category_tag_formats")
           .insert({
@@ -122,7 +103,6 @@ export function TagFormatTab() {
             prefix: prefix.trim(),
             zero_padding: padding,
             current_number: 1,
-            organisation_id: userData?.organisation_id,
           });
         
         if (error) throw error;

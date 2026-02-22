@@ -81,10 +81,10 @@ const CreateRepair = () => {
 
       if (error) throw error;
 
-      // Update asset status to in_repair
+      // Update asset status to maintenance
       await supabase
         .from("itam_assets")
-        .update({ status: "in_repair", updated_by: currentUser?.id })
+        .update({ status: "maintenance", updated_by: currentUser?.id })
         .eq("id", data.asset_id);
 
       // Log to history

@@ -89,7 +89,7 @@ const SubscriptionList = () => {
               <Download className="h-4 w-4 mr-2" />
               Export
             </Button>
-            <Button onClick={() => navigate("/helpdesk/subscription/add")}>
+            <Button onClick={() => navigate("/subscription/add")}>
               <Plus className="h-4 w-4 mr-2" />
               Add Subscription
             </Button>
@@ -154,16 +154,9 @@ const SubscriptionList = () => {
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => navigate(`/helpdesk/subscription/detail/${sub.id}`)}
+                          onClick={() => navigate(`/subscription/detail/${sub.id}`)}
                         >
                           <Eye className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => navigate(`/helpdesk/subscription/edit/${sub.id}`)}
-                        >
-                          <Edit className="h-4 w-4" />
                         </Button>
                       </div>
                     </TableCell>
