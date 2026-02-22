@@ -27,7 +27,7 @@ export interface AssetColumn {
 
 // System-controlled column order - positions are FIXED and cannot be changed by users
 const SYSTEM_COLUMN_ORDER: AssetColumn[] = [
-  { id: "asset_photo", label: "Asset Photo", visible: false, order_index: 0, category: "asset" },
+  { id: "asset_photo", label: "Image", visible: false, order_index: 0, category: "asset" },
   { id: "asset_tag", label: "Asset Tag ID", visible: true, locked: true, required: true, order_index: 1, category: "asset" },
   { id: "status", label: "Status", visible: true, order_index: 2, category: "event" },
   { id: "category", label: "Category", visible: true, order_index: 3, category: "linking" },
