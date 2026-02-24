@@ -14,7 +14,7 @@ import {
   TrendingUp, ClipboardCheck, CheckCircle, ExternalLink, MapPin, FolderTree, 
   Briefcase, Package, Pencil, Trash2, Settings, FileBarChart,
   ChevronLeft, ChevronRight, Tag, Loader2, MoreHorizontal, UserX, PackageX,
-  Send, Eye, UserMinus, ShoppingCart, ScrollText
+  Send, Eye, UserMinus, ShoppingCart, ScrollText, Key, TrendingDown, FileDown
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { SortableTableHeader, SortConfig } from "@/components/helpdesk/SortableTableHeader";
@@ -33,11 +33,19 @@ import AssetReports from "@/pages/helpdesk/assets/reports";
 import PurchaseOrdersList from "@/pages/helpdesk/assets/purchase-orders/index";
 import AssetLogsPage from "@/pages/helpdesk/assets/AssetLogsPage";
 import AssetAudit from "@/pages/helpdesk/assets/audit/index";
+import LicensesIndex from "@/pages/helpdesk/assets/licenses/index";
+import RepairsIndex from "@/pages/helpdesk/assets/repairs/index";
+import DepreciationDashboard from "@/pages/helpdesk/assets/depreciation/index";
+import ImportExportPage from "@/pages/helpdesk/assets/import-export";
 
 // Wrapper components to embed existing pages without their own headers/padding
 const PurchaseOrdersContent = () => <PurchaseOrdersList />;
 const AssetLogsContent = () => <AssetLogsPage />;
 const AssetAuditContent = () => <AssetAudit />;
+const LicensesContent = () => <LicensesIndex />;
+const RepairsContent = () => <RepairsIndex />;
+const DepreciationContent = () => <DepreciationDashboard />;
+const ImportExportContent = () => <ImportExportPage />;
 
 // Tab configuration for Setup sub-navigation
 const SETUP_TABS = [
@@ -232,7 +240,7 @@ export default function AdvancedPage() {
 
   useEffect(() => {
     const tab = searchParams.get("tab");
-    if (tab && ["employees", "vendors", "maintenances", "warranties", "tools", "purchase-orders", "setup", "reports", "logs", "audit"].includes(tab)) {
+    if (tab && ["employees", "licenses", "vendors", "repairs", "maintenances", "warranties", "depreciation", "tools", "import-export", "purchase-orders", "setup", "reports", "logs", "audit"].includes(tab)) {
       setActiveTab(tab);
     }
   }, [searchParams]);
@@ -864,9 +872,17 @@ export default function AdvancedPage() {
               <Users className="h-3.5 w-3.5" />
               Employees
             </TabsTrigger>
+            <TabsTrigger value="licenses" className="gap-1.5 text-xs">
+              <Key className="h-3.5 w-3.5" />
+              Licenses
+            </TabsTrigger>
             <TabsTrigger value="vendors" className="gap-1.5 text-xs">
               <Building2 className="h-3.5 w-3.5" />
               Vendors
+            </TabsTrigger>
+            <TabsTrigger value="repairs" className="gap-1.5 text-xs">
+              <Wrench className="h-3.5 w-3.5" />
+              Repairs
             </TabsTrigger>
             <TabsTrigger value="maintenances" className="gap-1.5 text-xs">
               <Wrench className="h-3.5 w-3.5" />
@@ -876,9 +892,17 @@ export default function AdvancedPage() {
               <Shield className="h-3.5 w-3.5" />
               Warranties
             </TabsTrigger>
+            <TabsTrigger value="depreciation" className="gap-1.5 text-xs">
+              <TrendingDown className="h-3.5 w-3.5" />
+              Depreciation
+            </TabsTrigger>
             <TabsTrigger value="tools" className="gap-1.5 text-xs">
               <Upload className="h-3.5 w-3.5" />
               Tools
+            </TabsTrigger>
+            <TabsTrigger value="import-export" className="gap-1.5 text-xs">
+              <FileDown className="h-3.5 w-3.5" />
+              Import/Export
             </TabsTrigger>
             <TabsTrigger value="purchase-orders" className="gap-1.5 text-xs">
               <ShoppingCart className="h-3.5 w-3.5" />
@@ -1433,6 +1457,26 @@ export default function AdvancedPage() {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          {/* Licenses Tab */}
+          <TabsContent value="licenses" className="mt-0">
+            <LicensesContent />
+          </TabsContent>
+
+          {/* Repairs Tab */}
+          <TabsContent value="repairs" className="mt-0">
+            <RepairsContent />
+          </TabsContent>
+
+          {/* Depreciation Tab */}
+          <TabsContent value="depreciation" className="mt-0">
+            <DepreciationContent />
+          </TabsContent>
+
+          {/* Import/Export Tab */}
+          <TabsContent value="import-export" className="mt-0">
+            <ImportExportContent />
           </TabsContent>
 
           {/* Purchase Orders Tab */}
