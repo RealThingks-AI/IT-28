@@ -4363,17 +4363,29 @@ export type Database = {
       }
       clean_expired_recovery_codes: { Args: never; Returns: undefined }
       cleanup_old_backups: { Args: { _org_id: string }; Returns: undefined }
-      create_notification: {
-        Args: {
-          p_message: string
-          p_organisation_id?: string
-          p_tenant_id?: number
-          p_title: string
-          p_type: Database["public"]["Enums"]["notification_type"]
-          p_user_id: string
-        }
-        Returns: string
-      }
+      create_notification:
+        | {
+            Args: {
+              p_message: string
+              p_organisation_id?: string
+              p_tenant_id?: number
+              p_title: string
+              p_type: Database["public"]["Enums"]["notification_type"]
+              p_user_id: string
+            }
+            Returns: string
+          }
+        | {
+            Args: {
+              p_message: string
+              p_organisation_id?: string
+              p_tenant_id?: number
+              p_title: string
+              p_type?: string
+              p_user_id: string
+            }
+            Returns: string
+          }
       generate_asset_tag: { Args: { tenant_id_param: number }; Returns: string }
       generate_change_number: {
         Args: { p_org_id?: string; p_tenant_id: number }

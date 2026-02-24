@@ -150,6 +150,24 @@ Deno.serve(async (req) => {
           existingEmails.add(email);
           results.push({ email, status: "created" });
           created++;
+
+          // Insert audit log for each created user
+          const ipAddress = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null;
+          await supabaseAdmin.from('audit_logs').insert({
+            action_type: 'user_created',
+            entity_type: 'users',
+            entity_id: createData.user.id,
+            user_id: callerUser.id,
+            ip_address: ipAddress,
+            user_agent: req.headers.get('user-agent') || null,
+            metadata: {
+              target_email: email,
+              created_by_email: callerUser.email,
+              role,
+              name: name || null,
+              source: 'bulk_import',
+            },
+          });
         }
       } catch (err: any) {
         results.push({ email, status: "error", error: err.message || "Unknown error" });

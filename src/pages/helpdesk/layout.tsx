@@ -30,6 +30,8 @@ const routeTitles: Record<string, string> = {
   "/assets/reserve": "Reserve Asset",
   "/assets/reports": "Asset Reports",
   "/assets/audit": "Asset Audit",
+  "/assets/logs": "Asset Logs",
+  "/assets/advanced": "Asset Advanced",
   "/assets/explore/bulk-actions": "Bulk Actions",
   
   "/assets/repairs": "Repairs & Maintenance",
@@ -76,7 +78,8 @@ const routeTitles: Record<string, string> = {
 const pagesWithCustomHeader = [
   "/reports",
   "/monitoring",
-  "/audit"
+  "/audit",
+  "/settings"
 ];
 
 // Pages that have their own inline h2 headers - don't show default title
@@ -85,22 +88,16 @@ const pagesWithInlineHeader = [
   "/sla",
   "/queues",
   "/changes",
-  "/dashboard"
+  "/dashboard",
+  "/assets/allassets",
 ];
 
 const HelpdeskLayout = () => {
   const location = useLocation();
   const { user, loading } = useAuth();
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
-  if (!user) {
+  // Only redirect if we're certain there's no user (finished loading, no user)
+  if (!loading && !user) {
     return <Navigate to="/login" replace />;
   }
 
@@ -140,12 +137,12 @@ const HelpdeskLayout = () => {
       <HelpdeskSidebar />
 
       <main className="flex-1 h-screen flex flex-col bg-background overflow-hidden will-change-auto">
-        <header className="border-b px-4 flex items-center justify-between shrink-0 h-11">
-          <div id="helpdesk-header-left" className="flex items-center gap-3">
+        <header className="border-b px-4 flex items-center justify-between shrink-0 min-h-[2.75rem]">
+          <div id="helpdesk-header-left" className="flex items-center gap-3 flex-1 min-w-0">
             {showDefaultTitle && (
               <h1 className="text-sm font-semibold text-foreground">{pageTitle}</h1>
             )}
-            <div id="settings-header-portal" />
+            <div id="settings-header-portal" className="flex-shrink-0" />
           </div>
 
           <div className="flex items-center">

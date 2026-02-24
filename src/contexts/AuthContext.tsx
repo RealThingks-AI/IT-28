@@ -14,8 +14,8 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Increased timeout for cold starts - 5 seconds allows for slower initial loads
-const AUTH_INIT_TIMEOUT_MS = 5000;
+// Reduced timeout for faster perceived performance
+const AUTH_INIT_TIMEOUT_MS = 2000;
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);

@@ -75,7 +75,7 @@ const AddVendor = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="p-6 max-w-3xl mx-auto space-y-6">
+      <div className="p-6 space-y-6">
         <div className="flex items-center gap-4">
           <BackButton />
           <div>
@@ -88,12 +88,6 @@ const AddVendor = () => {
 
         <form onSubmit={handleSubmit}>
           <Card>
-            <CardHeader>
-              <CardTitle>Vendor Information</CardTitle>
-              <CardDescription>
-                Enter vendor details and contact information
-              </CardDescription>
-            </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="name">Vendor Name *</Label>

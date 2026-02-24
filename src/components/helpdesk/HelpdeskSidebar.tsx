@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { LayoutDashboard, Ticket, Package, CreditCard, Activity, BarChart3, Settings, ChevronLeft, ChevronRight, RefreshCw, Download, Monitor, LucideIcon, ClipboardCheck, Key, Building2, ListChecks, Receipt, List, AlertTriangle } from "lucide-react";
+import { LayoutDashboard, Ticket, Package, CreditCard, Activity, BarChart3, Settings, ChevronLeft, ChevronRight, RefreshCw, Download, Monitor, LucideIcon, ClipboardCheck, Key, Building2, ListChecks, Receipt, List, AlertTriangle, ScrollText } from "lucide-react";
 import appLogo from "@/assets/app-logo.png";
 import { NavLink, useLocation } from "react-router-dom";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -34,6 +34,10 @@ const assetChildren: SidebarChild[] = [{
   title: "List of Assets",
   url: "/assets/allassets",
   icon: List
+}, {
+  title: "Logs",
+  url: "/assets/logs",
+  icon: ScrollText
 }, {
   title: "Advanced",
   url: "/assets/advanced",
@@ -411,42 +415,6 @@ export function HelpdeskSidebar() {
             );
           }
           return collapseButton;
-        })()}
-      </div>
-
-      {/* Settings Button */}
-      <div className="px-1.5 pb-1">
-        {(() => {
-          const settingsActive = location.pathname.startsWith("/settings");
-          const settingsButton = (
-            <NavLink
-              to="/settings"
-              className={cn(
-                "flex items-center h-8 w-full rounded-lg transition-all duration-200 text-sm",
-                settingsActive
-                  ? "text-primary bg-accent"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent/40"
-              )}
-            >
-              <div className="w-12 flex items-center justify-center flex-shrink-0">
-                <Settings className="h-4 w-4" />
-              </div>
-              {!collapsed && <span>Settings</span>}
-            </NavLink>
-          );
-          if (collapsed) {
-            return (
-              <TooltipProvider delayDuration={0}>
-                <Tooltip>
-                  <TooltipTrigger asChild>{settingsButton}</TooltipTrigger>
-                  <TooltipContent side="right" sideOffset={8} className="z-50">
-                    <p className="text-xs">Settings</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            );
-          }
-          return settingsButton;
         })()}
       </div>
 

@@ -161,7 +161,7 @@ const Login = () => {
           {/* Header */}
           <div className="text-center mb-6">
             <div className="flex items-center justify-center mb-3">
-              <img src={appLogo} alt="RT-IT-Hub" className="w-12 h-12" />
+              <img src={appLogo} alt="RT-IT-Hub" className="w-12 h-12 object-contain" />
             </div>
             <h1 className="text-2xl font-bold text-foreground">
               {isSignup ? "Create your RT-IT-Hub account" : "Sign in to RT-IT-Hub"}

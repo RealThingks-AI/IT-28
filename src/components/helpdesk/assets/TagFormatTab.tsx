@@ -58,6 +58,33 @@ export function TagFormatTab() {
     },
   });
 
+  // Fetch all asset tags to compute actual next available numbers
+  const { data: allAssetTags = [] } = useQuery({
+    queryKey: ["all-asset-tags-for-preview"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("itam_assets")
+        .select("asset_tag")
+        .not("asset_tag", "is", null);
+      if (error) throw error;
+      return (data || []).map((a) => a.asset_tag).filter(Boolean) as string[];
+    },
+  });
+
+  const getNextNumberForPrefix = (prefix: string): number => {
+    let maxNumber = 0;
+    for (const tag of allAssetTags) {
+      if (tag.startsWith(prefix)) {
+        const numPart = tag.substring(prefix.length);
+        const num = parseInt(numPart, 10);
+        if (!isNaN(num) && num > maxNumber) {
+          maxNumber = num;
+        }
+      }
+    }
+    return maxNumber + 1;
+  };
+
   const getTagFormatForCategory = (categoryId: string) => {
     return tagFormats.find((tf) => tf.category_id === categoryId);
   };
@@ -176,7 +203,7 @@ export function TagFormatTab() {
                     <TableCell>
                       {tagFormat ? (
                         <code className="text-xs bg-muted px-2 py-1 rounded">
-                          {tagFormat.prefix}{tagFormat.current_number.toString().padStart(tagFormat.zero_padding, "0")}
+                          {tagFormat.prefix}{getNextNumberForPrefix(tagFormat.prefix).toString().padStart(tagFormat.zero_padding, "0")}
                         </code>
                       ) : (
                         "—"

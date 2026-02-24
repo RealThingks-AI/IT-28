@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -102,6 +102,7 @@ export default function AddAsset() {
   const [isAutoFilling, setIsAutoFilling] = useState(false);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [hasPopulatedForm, setHasPopulatedForm] = useState(false);
+  const autoFillRef = useRef(false);
 
   // Quick Add Dialog state
   const [quickAddOpen, setQuickAddOpen] = useState(false);
@@ -211,6 +212,9 @@ export default function AddAsset() {
       toast.error("Please select a category first");
       return;
     }
+    // Ref guard to prevent double-clicks / rapid calls
+    if (autoFillRef.current) return;
+    autoFillRef.current = true;
     setIsAutoFilling(true);
     try {
       const { data, error } = await supabase.functions.invoke("get-next-asset-id-by-category", {
@@ -227,6 +231,19 @@ export default function AddAsset() {
         return;
       }
       if (data?.assetId) {
+        // Post-generation uniqueness validation
+        const { data: existing } = await supabase
+          .from("itam_assets")
+          .select("id")
+          .eq("asset_tag", data.assetId)
+          .eq("is_active", true)
+          .maybeSingle();
+
+        if (existing) {
+          toast.error(`Generated ID "${data.assetId}" already exists. Please enter manually or retry.`);
+          return;
+        }
+
         setFormData(prev => ({
           ...prev,
           asset_tag: data.assetId
@@ -237,6 +254,7 @@ export default function AddAsset() {
       toast.error("Failed to generate Asset Tag ID");
     } finally {
       setIsAutoFilling(false);
+      autoFillRef.current = false;
     }
   };
 
@@ -313,6 +331,36 @@ export default function AddAsset() {
         }
       } as any);
       if (error) throw error;
+
+      // Log asset creation
+      try {
+        const { data: newAsset } = await supabase
+          .from("itam_assets")
+          .select("id")
+          .eq("asset_tag", assetId)
+          .eq("is_active", true)
+          .maybeSingle();
+
+        if (newAsset) {
+          await supabase.from("itam_asset_history").insert({
+            asset_id: newAsset.id,
+            asset_tag: assetId,
+            action: "created",
+            new_value: assetId,
+            details: {
+              name: formData.model || "Unnamed Asset",
+              category_id: formData.category_id || null,
+              serial_number: formData.serial_number || null,
+              model: formData.model || null,
+              status: "available",
+            },
+            performed_by: user.id,
+            tenant_id: tenantId,
+          } as any);
+        }
+      } catch (logErr) {
+        console.error("Failed to log asset creation:", logErr);
+      }
     },
     onSuccess: () => {
       toast.success("Asset created successfully");
@@ -329,6 +377,8 @@ export default function AddAsset() {
     mutationFn: async () => {
       if (!editAssetId) throw new Error("No asset ID provided");
 
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+
       // Check for duplicate asset tag (excluding current asset)
       if (formData.asset_tag) {
         const { data: existingTag } = await supabase
@@ -341,42 +391,85 @@ export default function AddAsset() {
         if (existingTag) throw new Error("This Asset Tag ID is already in use. Please use a different one.");
       }
 
+      // Fetch current asset for change detection
+      const { data: currentAsset } = await supabase
+        .from("itam_assets")
+        .select("*")
+        .eq("id", editAssetId)
+        .single();
+
       const classifications: string[] = [];
       if (formData.classification_confidential) classifications.push("confidential");
       if (formData.classification_internal) classifications.push("internal");
       if (formData.classification_public) classifications.push("public");
 
+      const newValues: Record<string, any> = {
+        asset_tag: formData.asset_tag || null,
+        name: formData.model || "Unnamed Asset",
+        status: formData.status,
+        category_id: formData.category_id || null,
+        location_id: formData.location_id || null,
+        department_id: formData.department_id || null,
+        make_id: formData.make_id || null,
+        vendor_id: formData.vendor_id || null,
+        model: formData.model || null,
+        serial_number: formData.serial_number || null,
+        purchase_price: formData.cost ? parseFloat(formData.cost) : null,
+        notes: formData.description || null,
+        purchase_date: formData.purchase_date ? format(formData.purchase_date, "yyyy-MM-dd") : null,
+        warranty_expiry: formData.warranty_expiry ? format(formData.warranty_expiry, "yyyy-MM-dd") : null,
+        custom_fields: {
+          asset_configuration: formData.asset_configuration,
+          classification: classifications,
+          currency: formData.currency,
+          vendor: formData.purchased_from,
+          photo_url: formData.photo_url,
+          site_id: formData.site_id || null,
+          lease_start_date: formData.lease_start_date ? format(formData.lease_start_date, "yyyy-MM-dd") : null,
+          lease_expiry: formData.lease_expiry ? format(formData.lease_expiry, "yyyy-MM-dd") : null
+        }
+      };
+
       const { error } = await supabase
         .from("itam_assets")
-        .update({
-          asset_tag: formData.asset_tag || null,
-          name: formData.model || "Unnamed Asset",
-          status: formData.status,
-          category_id: formData.category_id || null,
-          location_id: formData.location_id || null,
-          department_id: formData.department_id || null,
-          make_id: formData.make_id || null,
-          vendor_id: formData.vendor_id || null,
-          model: formData.model || null,
-          serial_number: formData.serial_number || null,
-          purchase_price: formData.cost ? parseFloat(formData.cost) : null,
-          notes: formData.description || null,
-          purchase_date: formData.purchase_date ? format(formData.purchase_date, "yyyy-MM-dd") : null,
-          warranty_expiry: formData.warranty_expiry ? format(formData.warranty_expiry, "yyyy-MM-dd") : null,
-          custom_fields: {
-            asset_configuration: formData.asset_configuration,
-            classification: classifications,
-            currency: formData.currency,
-            vendor: formData.purchased_from,
-            photo_url: formData.photo_url,
-            site_id: formData.site_id || null,
-            lease_start_date: formData.lease_start_date ? format(formData.lease_start_date, "yyyy-MM-dd") : null,
-            lease_expiry: formData.lease_expiry ? format(formData.lease_expiry, "yyyy-MM-dd") : null
-          }
-        })
+        .update(newValues)
         .eq("id", editAssetId);
 
       if (error) throw error;
+
+      // Field-level change logging
+      if (currentAsset && authUser) {
+        try {
+          const trackedFields = [
+            "name", "status", "category_id", "location_id", "department_id",
+            "make_id", "serial_number", "purchase_price", "notes",
+            "warranty_expiry", "model", "asset_tag", "vendor_id",
+            "purchase_date",
+          ];
+          const logEntries: any[] = [];
+          for (const field of trackedFields) {
+            const oldVal = String(currentAsset[field] ?? "");
+            const newVal = String(newValues[field] ?? "");
+            if (oldVal !== newVal) {
+              logEntries.push({
+                asset_id: editAssetId,
+                asset_tag: newValues.asset_tag || currentAsset.asset_tag,
+                action: field === "status" ? "status_changed" : "field_updated",
+                old_value: oldVal || null,
+                new_value: newVal || null,
+                details: { field, old: oldVal || null, new: newVal || null },
+                performed_by: authUser.id,
+                tenant_id: currentAsset.tenant_id,
+              });
+            }
+          }
+          if (logEntries.length > 0) {
+            await supabase.from("itam_asset_history").insert(logEntries as any);
+          }
+        } catch (logErr) {
+          console.error("Failed to log asset changes:", logErr);
+        }
+      }
     },
     onSuccess: () => {
       toast.success("Asset updated successfully");

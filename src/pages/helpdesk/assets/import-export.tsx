@@ -19,7 +19,8 @@ import {
   CheckCircle2, 
   XCircle, 
   AlertTriangle,
-  FileDown
+  FileDown,
+  Headphones
 } from "lucide-react";
 import { useAssetExportImport, EXPORT_FIELD_GROUPS, getDefaultSelectedFields } from "@/hooks/useAssetExportImport";
 
@@ -28,6 +29,7 @@ export default function ImportExportPage() {
   const {
     exportAssets,
     importAssets,
+    importPeripherals,
     downloadTemplate,
     isExporting,
     isImporting,
@@ -35,10 +37,12 @@ export default function ImportExportPage() {
     importErrors,
   } = useAssetExportImport();
 
-  const [activeTab, setActiveTab] = useState<"export" | "import">("export");
+  const [activeTab, setActiveTab] = useState<"export" | "import" | "peripherals">("export");
   const [selectedFields, setSelectedFields] = useState<string[]>(getDefaultSelectedFields());
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importResult, setImportResult] = useState<{ success: number; errors: any[] } | null>(null);
+  const [peripheralFile, setPeripheralFile] = useState<File | null>(null);
+  const [peripheralResult, setPeripheralResult] = useState<{ success: number; errors: any[] } | null>(null);
 
   const handleFieldToggle = (fieldKey: string, checked: boolean) => {
     if (checked) {
@@ -65,9 +69,7 @@ export default function ImportExportPage() {
   };
 
   const handleExport = async () => {
-    if (selectedFields.length === 0) {
-      return;
-    }
+    if (selectedFields.length === 0) return;
     await exportAssets(selectedFields);
   };
 
@@ -83,6 +85,20 @@ export default function ImportExportPage() {
     if (!importFile) return;
     const result = await importAssets(importFile);
     setImportResult(result);
+  };
+
+  const handlePeripheralFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setPeripheralFile(file);
+      setPeripheralResult(null);
+    }
+  };
+
+  const handlePeripheralImport = async () => {
+    if (!peripheralFile) return;
+    const result = await importPeripherals(peripheralFile);
+    setPeripheralResult(result);
   };
 
   return (
@@ -104,8 +120,8 @@ export default function ImportExportPage() {
         </div>
 
         {/* Tabs */}
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "export" | "import")}>
-          <TabsList className="grid w-full max-w-md grid-cols-2">
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
+          <TabsList className="grid w-full max-w-lg grid-cols-3">
             <TabsTrigger value="export" className="gap-2">
               <Download className="h-4 w-4" />
               Export
@@ -113,6 +129,10 @@ export default function ImportExportPage() {
             <TabsTrigger value="import" className="gap-2">
               <Upload className="h-4 w-4" />
               Import
+            </TabsTrigger>
+            <TabsTrigger value="peripherals" className="gap-2">
+              <Headphones className="h-4 w-4" />
+              Peripherals
             </TabsTrigger>
           </TabsList>
 
@@ -319,34 +339,12 @@ export default function ImportExportPage() {
               <CardContent>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                   {[
-                    "Asset Tag ID",
-                    "Description",
-                    "Category",
-                    "Brand",
-                    "Model",
-                    "Serial No",
-                    "Status",
-                    "Cost",
-                    "Purchase Date",
-                    "Purchased from",
-                    "Location",
-                    "Site",
-                    "Department",
-                    "Assigned to",
-                    "Date Created",
-                    "Created by",
-                    "Leased to",
-                    "Relation",
-                    "Transact as a whole",
-                    "Event Date",
-                    "Event Due Date",
-                    "Event Notes",
-                    "Asset Configuration",
-                    "Asset Classification",
-                    "Asset Photo",
-                    "Headphone",
-                    "Mouse",
-                    "Keyboard",
+                    "Asset Tag ID", "Description", "Category", "Brand", "Model",
+                    "Serial No", "Status", "Cost", "Purchase Date", "Purchased from",
+                    "Location", "Site", "Department", "Assigned to", "Date Created",
+                    "Created by", "Leased to", "Relation", "Transact as a whole",
+                    "Event Date", "Event Due Date", "Event Notes", "Asset Configuration",
+                    "Asset Classification", "Asset Photo", "Headphone", "Mouse", "Keyboard",
                     "Warranty Expiry",
                   ].map((c) => (
                     <Badge key={c} variant="outline" className="text-xs justify-start">
@@ -358,6 +356,133 @@ export default function ImportExportPage() {
                   <strong>Required:</strong> Asset Tag ID. All other fields are optional.
                   Category, Brand, Location, Site, Department, and Vendor will be <strong>auto-created</strong> if they don't already exist.
                 </p>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Peripherals Tab */}
+          <TabsContent value="peripherals" className="space-y-4 mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Headphones className="h-5 w-5" />
+                  Import Peripherals (Headphones, Mouse, Keyboard)
+                </CardTitle>
+                <CardDescription>
+                  Upload the peripheral Excel file with columns: Sr No, Name, Email, Headphone Serial, HP Tag, Mouse Serial, Mouse Tag, KB Serial, KB Tag
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Format Guide */}
+                <div className="p-3 bg-muted/50 rounded-lg space-y-2">
+                  <p className="text-sm font-medium">Expected Excel Format</p>
+                  <div className="grid grid-cols-9 gap-1 text-xs text-muted-foreground">
+                    {["Sr No", "Name", "Email", "HP Serial", "HP Tag", "Mouse Serial", "Mouse Tag", "KB Serial", "KB Tag"].map((h) => (
+                      <Badge key={h} variant="outline" className="text-[10px] justify-center">
+                        {h}
+                      </Badge>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Entries with "NA" as serial or tag will be skipped. Rows without an email are created as unassigned (available).
+                  </p>
+                </div>
+
+                {/* File Upload */}
+                <div className="space-y-2">
+                  <Label htmlFor="peripheral-file">Select Peripheral Excel (.xlsx, .xls)</Label>
+                  <Input
+                    id="peripheral-file"
+                    type="file"
+                    accept=".xlsx,.xls"
+                    onChange={handlePeripheralFileSelect}
+                    disabled={isImporting}
+                  />
+                  {peripheralFile && (
+                    <p className="text-sm text-muted-foreground">
+                      Selected: {peripheralFile.name} ({(peripheralFile.size / 1024).toFixed(1)} KB)
+                    </p>
+                  )}
+                </div>
+
+                {/* Import Button */}
+                <Button
+                  onClick={handlePeripheralImport}
+                  disabled={!peripheralFile || isImporting}
+                  className="w-full sm:w-auto"
+                >
+                  {isImporting ? (
+                    <>
+                      <Upload className="h-4 w-4 mr-2 animate-pulse" />
+                      Importing... ({importProgress.current}/{importProgress.total})
+                    </>
+                  ) : (
+                    <>
+                      <Headphones className="h-4 w-4 mr-2" />
+                      Import Peripherals
+                    </>
+                  )}
+                </Button>
+
+                {/* Progress */}
+                {isImporting && activeTab === "peripherals" && (
+                  <div className="space-y-2">
+                    <Progress
+                      value={importProgress.total > 0 ? (importProgress.current / importProgress.total) * 100 : 0}
+                      className="h-2"
+                    />
+                    <p className="text-xs text-muted-foreground text-center">
+                      Processing {importProgress.current} of {importProgress.total} peripheral entries
+                    </p>
+                  </div>
+                )}
+
+                {/* Peripheral Result */}
+                {peripheralResult && (
+                  <div className="space-y-3 pt-4 border-t">
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2 text-primary">
+                        <CheckCircle2 className="h-5 w-5" />
+                        <span className="font-medium">{peripheralResult.success} imported</span>
+                      </div>
+                      {peripheralResult.errors.length > 0 && (
+                        <div className="flex items-center gap-2 text-destructive">
+                          <XCircle className="h-5 w-5" />
+                          <span className="font-medium">{peripheralResult.errors.length} warnings</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {importErrors.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 text-sm font-medium">
+                          <AlertTriangle className="h-4 w-4 text-warning" />
+                          Import Log
+                        </div>
+                        <ScrollArea className="h-48 rounded-md border">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="w-20">Row</TableHead>
+                                <TableHead>Detail</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {importErrors.map((err, idx) => (
+                                <TableRow key={idx}>
+                                  <TableCell className="font-mono text-xs">{err.row}</TableCell>
+                                  <TableCell className="text-xs text-muted-foreground">
+                                    {err.error}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </ScrollArea>
+                      </div>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

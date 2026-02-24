@@ -1,14 +1,20 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Package, ExternalLink, Mail, User } from "lucide-react";
-import { format } from "date-fns";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Package, Mail, User, MoreHorizontal, ExternalLink, RotateCcw, UserPlus, CheckSquare } from "lucide-react";
+import { getStatusLabel } from "@/lib/assetStatusUtils";
+import { useUsers } from "@/hooks/useUsers";
+import { toast } from "sonner";
 
 interface Employee {
   id: string;
@@ -27,25 +33,32 @@ interface EmployeeAssetsDialogProps {
 
 export function EmployeeAssetsDialog({ employee, open, onOpenChange }: EmployeeAssetsDialogProps) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { data: allUsers = [] } = useUsers();
+
+  // Sub-dialog states
+  const [reassignAsset, setReassignAsset] = useState<any>(null);
+  const [reassignUserId, setReassignUserId] = useState("");
+  const [returnAsset, setReturnAsset] = useState<any>(null);
+
+  // Selection state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkAction, setBulkAction] = useState<"reassign" | "return" | null>(null);
+  const [bulkReassignUserId, setBulkReassignUserId] = useState("");
 
   // Fetch assets assigned to this employee
-  const { data: assignments = [], isLoading } = useQuery({
-    queryKey: ["employee-assets", employee?.id],
+  const { data: assets = [], isLoading } = useQuery({
+    queryKey: ["employee-assigned-assets", employee?.id, employee?.auth_user_id],
     queryFn: async () => {
       if (!employee?.id) return [];
-      
+      const ids = [employee.id, employee.auth_user_id].filter(Boolean) as string[];
+      const orFilter = ids.map(id => `assigned_to.eq.${id}`).join(',');
       const { data } = await supabase
-        .from("itam_asset_assignments")
-        .select(`
-          id,
-          assigned_at,
-          returned_at,
-          asset:itam_assets(id, name, asset_tag, asset_id, status, category:itam_categories(name))
-        `)
-        .eq("assigned_to", employee.id)
-        .is("returned_at", null)
-        .order("assigned_at", { ascending: false });
-      
+        .from("itam_assets")
+        .select("id, name, asset_tag, asset_id, status, category:itam_categories(name)")
+        .or(orFilter)
+        .eq("is_active", true)
+        .order("name");
       return data || [];
     },
     enabled: !!employee?.id && open,
@@ -53,27 +66,144 @@ export function EmployeeAssetsDialog({ employee, open, onOpenChange }: EmployeeA
 
   // Fetch assignment history
   const { data: history = [] } = useQuery({
-    queryKey: ["employee-asset-history", employee?.id],
+    queryKey: ["employee-asset-history", employee?.id, employee?.auth_user_id],
     queryFn: async () => {
       if (!employee?.id) return [];
-      
+      const ids = [employee.id, employee.auth_user_id].filter(Boolean) as string[];
+      const orFilter = ids.map(id => `assigned_to.eq.${id}`).join(',');
       const { data } = await supabase
         .from("itam_asset_assignments")
-        .select(`
-          id,
-          assigned_at,
-          returned_at,
-          asset:itam_assets(id, name, asset_tag, asset_id)
-        `)
-        .eq("assigned_to", employee.id)
+        .select(`id, assigned_at, returned_at, asset:itam_assets(id, name, asset_tag, asset_id)`)
+        .or(orFilter)
         .not("returned_at", "is", null)
         .order("returned_at", { ascending: false })
         .limit(10);
-      
       return data || [];
     },
     enabled: !!employee?.id && open,
   });
+
+  // Reassign mutation
+  const reassignMutation = useMutation({
+    mutationFn: async ({ assetId, newUserId }: { assetId: string; newUserId: string }) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      // Update asset assigned_to
+      const { error: updateErr } = await supabase
+        .from("itam_assets")
+        .update({ assigned_to: newUserId, status: "in_use", updated_at: new Date().toISOString() })
+        .eq("id", assetId);
+      if (updateErr) throw updateErr;
+
+      // Close old assignment if exists
+      if (employee) {
+        const ids = [employee.id, employee.auth_user_id].filter(Boolean) as string[];
+        for (const uid of ids) {
+          await supabase
+            .from("itam_asset_assignments")
+            .update({ returned_at: new Date().toISOString() })
+            .eq("asset_id", assetId)
+            .eq("assigned_to", uid)
+            .is("returned_at", null);
+        }
+      }
+
+      // Create new assignment
+      await supabase.from("itam_asset_assignments").insert({
+        asset_id: assetId,
+        assigned_to: newUserId,
+        assigned_by: user?.id || null,
+        assigned_at: new Date().toISOString(),
+      });
+    },
+    onSuccess: () => {
+      toast.success("Asset reassigned successfully");
+      queryClient.invalidateQueries({ queryKey: ["employee-assigned-assets"] });
+      queryClient.invalidateQueries({ queryKey: ["employee-asset-history"] });
+      queryClient.invalidateQueries({ queryKey: ["employee-asset-counts"] });
+      setReassignAsset(null);
+      setReassignUserId("");
+    },
+    onError: (err: Error) => toast.error("Failed to reassign: " + err.message),
+  });
+
+  // Return to stock mutation
+  const returnMutation = useMutation({
+    mutationFn: async (assetId: string) => {
+      const { error: updateErr } = await supabase
+        .from("itam_assets")
+        .update({ assigned_to: null, status: "available", updated_at: new Date().toISOString() })
+        .eq("id", assetId);
+      if (updateErr) throw updateErr;
+
+      // Close assignment record
+      if (employee) {
+        const ids = [employee.id, employee.auth_user_id].filter(Boolean) as string[];
+        for (const uid of ids) {
+          await supabase
+            .from("itam_asset_assignments")
+            .update({ returned_at: new Date().toISOString() })
+            .eq("asset_id", assetId)
+            .eq("assigned_to", uid)
+            .is("returned_at", null);
+        }
+      }
+    },
+    onSuccess: () => {
+      toast.success("Asset returned to stock");
+      queryClient.invalidateQueries({ queryKey: ["employee-assigned-assets"] });
+      queryClient.invalidateQueries({ queryKey: ["employee-asset-history"] });
+      queryClient.invalidateQueries({ queryKey: ["employee-asset-counts"] });
+      setReturnAsset(null);
+    },
+    onError: (err: Error) => toast.error("Failed to return: " + err.message),
+  });
+
+  // Bulk return mutation
+  const bulkReturnMutation = useMutation({
+    mutationFn: async (assetIds: string[]) => {
+      for (const assetId of assetIds) {
+        await returnMutation.mutateAsync(assetId);
+      }
+    },
+    onSuccess: () => {
+      toast.success(`${selectedIds.size} assets returned to stock`);
+      setSelectedIds(new Set());
+      setBulkAction(null);
+    },
+  });
+
+  // Bulk reassign mutation
+  const bulkReassignMutation = useMutation({
+    mutationFn: async ({ assetIds, newUserId }: { assetIds: string[]; newUserId: string }) => {
+      for (const assetId of assetIds) {
+        await reassignMutation.mutateAsync({ assetId, newUserId });
+      }
+    },
+    onSuccess: () => {
+      toast.success(`${selectedIds.size} assets reassigned`);
+      setSelectedIds(new Set());
+      setBulkAction(null);
+      setBulkReassignUserId("");
+    },
+  });
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (selectedIds.size === assets.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(assets.map((a: any) => a.id)));
+    }
+  };
+
+  const selectedAssets = useMemo(() => assets.filter((a: any) => selectedIds.has(a.id)), [assets, selectedIds]);
 
   if (!employee) return null;
 
@@ -81,155 +211,306 @@ export function EmployeeAssetsDialog({ employee, open, onOpenChange }: EmployeeA
     ? employee.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
     : employee.email[0].toUpperCase();
 
+  const statusColor: Record<string, string> = {
+    available: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+    in_use: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+    maintenance: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
+    disposed: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-3">
-            <Avatar className="h-10 w-10">
-              <AvatarFallback className="bg-primary/10 text-primary font-medium">
-                {initials}
-              </AvatarFallback>
-            </Avatar>
+    <>
+      <Dialog open={open} onOpenChange={(o) => { if (!o) setSelectedIds(new Set()); onOpenChange(o); }}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3">
+              <Avatar className="h-10 w-10">
+                <AvatarFallback className="bg-primary/10 text-primary font-medium">{initials}</AvatarFallback>
+              </Avatar>
+              <div>
+                <p className="text-lg font-semibold">{employee.name || "Unknown User"}</p>
+                <p className="text-sm text-muted-foreground font-normal flex items-center gap-1.5">
+                  <Mail className="h-3.5 w-3.5" />
+                  {employee.email}
+                </p>
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-6 mt-2">
+            {/* Employee Details */}
+            <div className="flex items-center gap-4">
+              <span className="inline-flex items-center gap-1.5 text-sm capitalize">
+                <User className="h-3 w-3 text-muted-foreground" />
+                {employee.role || "user"}
+              </span>
+              <span className="inline-flex items-center gap-1.5 text-sm">
+                <span className={`h-2 w-2 rounded-full ${employee.status === "active" ? "bg-green-500" : "bg-red-500"}`} />
+                {employee.status === "active" ? "Active" : "Inactive"}
+              </span>
+              <div className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
+                <Package className="h-4 w-4" />
+                {assets.length} asset{assets.length !== 1 ? 's' : ''} assigned
+              </div>
+            </div>
+
+            {/* Bulk Actions Bar */}
+            {selectedIds.size > 0 && (
+              <div className="flex items-center gap-3 p-3 bg-primary/5 border border-primary/20 rounded-lg">
+                <CheckSquare className="h-4 w-4 text-primary" />
+                <span className="text-sm font-medium">{selectedIds.size} asset{selectedIds.size !== 1 ? 's' : ''} selected</span>
+                <div className="ml-auto flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={() => setBulkAction("reassign")}>
+                    <UserPlus className="h-3.5 w-3.5 mr-1.5" />
+                    Reassign All
+                  </Button>
+                  <Button size="sm" variant="outline" className="text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => setBulkAction("return")}>
+                    <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                    Return All
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
+                    Clear
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Currently Assigned Assets */}
             <div>
-              <p className="text-lg font-semibold">{employee.name || "Unknown User"}</p>
-              <p className="text-sm text-muted-foreground font-normal flex items-center gap-1.5">
-                <Mail className="h-3.5 w-3.5" />
-                {employee.email}
-              </p>
-            </div>
-          </DialogTitle>
-        </DialogHeader>
-
-        <div className="space-y-6 mt-2">
-          {/* Employee Details */}
-          <div className="flex items-center gap-4">
-            <Badge variant="outline" className="capitalize">
-              <User className="h-3 w-3 mr-1" />
-              {employee.role || "user"}
-            </Badge>
-            <Badge variant={employee.status === "active" ? "secondary" : "destructive"}>
-              {employee.status === "active" ? "Active" : "Inactive"}
-            </Badge>
-            <div className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
-              <Package className="h-4 w-4" />
-              {assignments.length} asset{assignments.length !== 1 ? 's' : ''} assigned
-            </div>
-          </div>
-
-          {/* Currently Assigned Assets */}
-          <div>
-            <h3 className="text-sm font-semibold mb-3">Currently Assigned Assets</h3>
-            <div className="border rounded-lg">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="text-xs">Asset</TableHead>
-                    <TableHead className="text-xs">Category</TableHead>
-                    <TableHead className="text-xs">Assigned Date</TableHead>
-                    <TableHead className="text-xs">Status</TableHead>
-                    <TableHead className="w-[60px]"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center py-8">
-                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto" />
-                      </TableCell>
-                    </TableRow>
-                  ) : assignments.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                        No assets currently assigned
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    assignments.map((assignment: any) => (
-                      <TableRow key={assignment.id}>
-                        <TableCell>
-                          <div>
-                            <p className="font-medium text-sm">{assignment.asset?.name}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {assignment.asset?.asset_id || assignment.asset?.asset_tag}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {assignment.asset?.category?.name || "-"}
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {assignment.assigned_at 
-                            ? format(new Date(assignment.assigned_at), "MMM d, yyyy")
-                            : "-"}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="secondary" className="capitalize text-xs">
-                            {assignment.asset?.status || "assigned"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={() => {
-                              onOpenChange(false);
-                              navigate(`/assets/detail/${assignment.asset?.id}`);
-                            }}
-                          >
-                            <ExternalLink className="h-3.5 w-3.5" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </div>
-
-          {/* Recent Return History */}
-          {history.length > 0 && (
-            <div>
-              <h3 className="text-sm font-semibold mb-3">Recent Return History</h3>
+              <h3 className="text-sm font-semibold mb-3">Currently Assigned Assets</h3>
               <div className="border rounded-lg">
                 <Table>
-                  <TableHeader>
+                  <TableHeader className="bg-muted/50">
                     <TableRow>
-                      <TableHead className="text-xs">Asset</TableHead>
-                      <TableHead className="text-xs">Assigned</TableHead>
-                      <TableHead className="text-xs">Returned</TableHead>
+                      <TableHead className="w-[40px]">
+                        {assets.length > 0 && (
+                          <Checkbox
+                            checked={assets.length > 0 && selectedIds.size === assets.length}
+                            onCheckedChange={toggleAll}
+                            aria-label="Select all"
+                          />
+                        )}
+                      </TableHead>
+                      
+                      <TableHead className="font-medium text-xs uppercase text-muted-foreground">Asset Tag</TableHead>
+                      <TableHead className="font-medium text-xs uppercase text-muted-foreground">Category</TableHead>
+                      <TableHead className="font-medium text-xs uppercase text-muted-foreground">Status</TableHead>
+                      <TableHead className="w-[60px]">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {history.map((item: any) => (
-                      <TableRow key={item.id} className="text-muted-foreground">
-                        <TableCell>
-                          <p className="text-sm">{item.asset?.name}</p>
-                          <p className="text-xs">
-                            {item.asset?.asset_id || item.asset?.asset_tag}
-                          </p>
-                        </TableCell>
-                        <TableCell className="text-xs">
-                          {item.assigned_at 
-                            ? format(new Date(item.assigned_at), "MMM d, yyyy")
-                            : "-"}
-                        </TableCell>
-                        <TableCell className="text-xs">
-                          {item.returned_at 
-                            ? format(new Date(item.returned_at), "MMM d, yyyy")
-                            : "-"}
+                    {isLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center py-8">
+                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto" />
                         </TableCell>
                       </TableRow>
-                    ))}
+                    ) : assets.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                          No assets currently assigned
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      assets.map((asset: any) => (
+                        <TableRow key={asset.id} className={selectedIds.has(asset.id) ? "bg-primary/5" : ""}>
+                          <TableCell>
+                            <Checkbox
+                              checked={selectedIds.has(asset.id)}
+                              onCheckedChange={() => toggleSelect(asset.id)}
+                              aria-label={`Select ${asset.name}`}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
+                              {asset.asset_id || asset.asset_tag || "—"}
+                            </code>
+                          </TableCell>
+                          <TableCell className="text-sm">{asset.category?.name || "—"}</TableCell>
+                          <TableCell>
+                            <Badge variant="secondary" className={`text-xs ${statusColor[asset.status] || ""}`}>
+                              {getStatusLabel(asset.status)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-7 w-7">
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-48">
+                                <DropdownMenuItem onClick={() => {
+                                  onOpenChange(false);
+                                  navigate(`/assets/detail/${asset.id}`);
+                                }}>
+                                  <ExternalLink className="h-4 w-4 mr-2" />
+                                  View Asset
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={() => { setReassignAsset(asset); setReassignUserId(""); }}>
+                                  <UserPlus className="h-4 w-4 mr-2" />
+                                  Reassign to User
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => setReturnAsset(asset)}>
+                                  <RotateCcw className="h-4 w-4 mr-2" />
+                                  Return to Stock
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
                   </TableBody>
                 </Table>
               </div>
             </div>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
+
+            {/* Recent Return History */}
+            {history.length > 0 && (
+              <div>
+                <h3 className="text-sm font-semibold mb-3">Recent Return History</h3>
+                <div className="border rounded-lg">
+                  <Table>
+                    <TableHeader className="bg-muted/50">
+                      <TableRow>
+                        <TableHead className="font-medium text-xs uppercase text-muted-foreground">Asset</TableHead>
+                        <TableHead className="font-medium text-xs uppercase text-muted-foreground">Assigned</TableHead>
+                        <TableHead className="font-medium text-xs uppercase text-muted-foreground">Returned</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {history.map((item: any) => (
+                        <TableRow key={item.id} className="text-muted-foreground">
+                          <TableCell>
+                            <p className="text-sm">{item.asset?.name}</p>
+                            <p className="text-xs">{item.asset?.asset_id || item.asset?.asset_tag}</p>
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            {item.assigned_at 
+                              ? new Date(item.assigned_at).toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" })
+                              : "-"}
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            {item.returned_at 
+                              ? new Date(item.returned_at).toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" })
+                              : "-"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reassign Dialog */}
+      <Dialog open={!!reassignAsset} onOpenChange={(open) => { if (!open) setReassignAsset(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reassign Asset</DialogTitle>
+            <DialogDescription>
+              Reassign <span className="font-medium">{reassignAsset?.name}</span> to another user.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Select value={reassignUserId} onValueChange={setReassignUserId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a user..." />
+              </SelectTrigger>
+              <SelectContent>
+                {allUsers
+                  .filter(u => u.id !== employee?.id && u.auth_user_id !== employee?.auth_user_id)
+                  .map(u => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.name || u.email} {u.role ? `(${u.role})` : ""}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReassignAsset(null)}>Cancel</Button>
+            <Button
+              disabled={!reassignUserId || reassignMutation.isPending}
+              onClick={() => reassignAsset && reassignMutation.mutate({ assetId: reassignAsset.id, newUserId: reassignUserId })}
+            >
+              {reassignMutation.isPending ? "Reassigning..." : "Reassign"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Return to Stock Confirmation */}
+      <ConfirmDialog
+        open={!!returnAsset}
+        onOpenChange={(open) => { if (!open) setReturnAsset(null); }}
+        onConfirm={() => returnAsset && returnMutation.mutate(returnAsset.id)}
+        title="Return to Stock"
+        description={`Return "${returnAsset?.name}" to available stock? This will unassign it from ${employee?.name || employee?.email}.`}
+        confirmText={returnMutation.isPending ? "Returning..." : "Return to Stock"}
+        variant="destructive"
+      />
+
+      {/* Bulk Reassign Dialog */}
+      <Dialog open={bulkAction === "reassign"} onOpenChange={(o) => { if (!o) { setBulkAction(null); setBulkReassignUserId(""); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Bulk Reassign Assets</DialogTitle>
+            <DialogDescription>
+              Reassign {selectedIds.size} selected asset{selectedIds.size !== 1 ? 's' : ''} to another user.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2 space-y-3">
+            <div className="text-xs text-muted-foreground space-y-1 max-h-24 overflow-y-auto">
+              {selectedAssets.map((a: any) => (
+                <div key={a.id} className="flex items-center gap-2">
+                  <span className="font-medium">{a.name}</span>
+                  <span className="text-muted-foreground">({a.asset_id || a.asset_tag})</span>
+                </div>
+              ))}
+            </div>
+            <Select value={bulkReassignUserId} onValueChange={setBulkReassignUserId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a user..." />
+              </SelectTrigger>
+              <SelectContent>
+                {allUsers
+                  .filter(u => u.id !== employee?.id && u.auth_user_id !== employee?.auth_user_id)
+                  .map(u => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.name || u.email} {u.role ? `(${u.role})` : ""}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setBulkAction(null); setBulkReassignUserId(""); }}>Cancel</Button>
+            <Button
+              disabled={!bulkReassignUserId || bulkReassignMutation.isPending}
+              onClick={() => bulkReassignMutation.mutate({ assetIds: Array.from(selectedIds), newUserId: bulkReassignUserId })}
+            >
+              {bulkReassignMutation.isPending ? "Reassigning..." : `Reassign ${selectedIds.size} Asset${selectedIds.size !== 1 ? 's' : ''}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Return Confirmation */}
+      <ConfirmDialog
+        open={bulkAction === "return"}
+        onOpenChange={(o) => { if (!o) setBulkAction(null); }}
+        onConfirm={() => bulkReturnMutation.mutate(Array.from(selectedIds))}
+        title="Bulk Return to Stock"
+        description={`Return ${selectedIds.size} selected asset${selectedIds.size !== 1 ? 's' : ''} to available stock? This will unassign them from ${employee?.name || employee?.email}.`}
+        confirmText={bulkReturnMutation.isPending ? "Returning..." : `Return ${selectedIds.size} Asset${selectedIds.size !== 1 ? 's' : ''}`}
+        variant="destructive"
+      />
+    </>
   );
 }

@@ -829,9 +829,159 @@ export function useAssetExportImport() {
     toast.success("Template downloaded");
   };
 
+  // ── Import Peripherals (Headphones, Mice, Keyboards) from Excel ──
+  const importPeripherals = async (file: File) => {
+    setIsImporting(true);
+    setImportErrors([]);
+    setImportProgress({ current: 0, total: 0 });
+
+    const EMAIL_ALIASES: Record<string, string> = {
+      "palla.siva.prasad@realthingks.com": "siva.prasad@realthingks.com",
+      "pranay.m@realthingks.com": "pranay.marchande@realthingks.com",
+      "ramakrishna.t@realthingks.com": "ramakrishna.tondapu@realthingks.com",
+      "sidharth.d@realthingks.com": "sidharth.dhammi@realthingks.com",
+      "shraddha.n@realthingks.com": "shraddha.nandwadekar@realthingks.com",
+      "vishal.s@realthingks.com": "vishal.srivastav@realthingks.com",
+    };
+
+    const PERIPHERAL_DEFS = [
+      { label: "Headphones", serialCol: 3, tagCol: 4, categoryId: "b74a9d25-2143-419f-945e-3a978c38fab0" },
+      { label: "Mouse", serialCol: 5, tagCol: 6, categoryId: "efff9267-49db-4dbe-a106-d4ee9f5e579b" },
+      { label: "Keyboard", serialCol: 7, tagCol: 8, categoryId: "8736a5f8-a761-49c1-be5d-8bb784614e3c" },
+    ];
+
+    try {
+      // Parse file using raw array approach for positional columns
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array", raw: true });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rawRows: string[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+
+      // Skip header row
+      const dataRows = rawRows.slice(1).filter((r) => r.some((c) => String(c).trim()));
+      if (dataRows.length === 0) {
+        toast.error("No data rows found");
+        return { success: 0, errors: [] };
+      }
+
+      // Fetch users for email resolution
+      const { data: usersData } = await supabase.from("users").select("id, name, email");
+      const users = usersData || [];
+      const emailToUser = new Map<string, { id: string; name: string | null }>();
+      users.forEach((u: any) => {
+        if (u.email) emailToUser.set(u.email.toLowerCase(), { id: u.id, name: u.name });
+      });
+
+      // Fetch existing asset tags for dedup
+      const { data: existingAssets } = await supabase
+        .from("itam_assets")
+        .select("asset_tag")
+        .eq("is_active", true);
+      const existingTags = new Set((existingAssets || []).map((a: any) => a.asset_tag));
+
+      const errors: { row: number; error: string }[] = [];
+      let successCount = 0;
+      let skippedNA = 0;
+      let skippedDup = 0;
+
+      const totalPossible = dataRows.length * 3;
+      setImportProgress({ current: 0, total: totalPossible });
+      let processed = 0;
+
+      for (let i = 0; i < dataRows.length; i++) {
+        const rowNum = i + 2;
+        const r = dataRows[i].map((c) => String(c).trim());
+
+        const employeeName = r[1] || "";
+        const rawEmail = (r[2] || "").toLowerCase().trim();
+
+        // Resolve email via alias map
+        const resolvedEmail = EMAIL_ALIASES[rawEmail] || rawEmail;
+        const user = resolvedEmail ? emailToUser.get(resolvedEmail) : null;
+        const isStock = !rawEmail || employeeName.toLowerCase() === "stock";
+
+        for (const def of PERIPHERAL_DEFS) {
+          processed++;
+          const serial = r[def.serialCol] || "";
+          const tag = r[def.tagCol] || "";
+
+          // Skip NA or empty
+          if (!serial || !tag || serial.toUpperCase() === "NA" || tag.toUpperCase() === "NA") {
+            skippedNA++;
+            setImportProgress({ current: processed, total: totalPossible });
+            continue;
+          }
+
+          // Skip duplicates
+          if (existingTags.has(tag)) {
+            skippedDup++;
+            errors.push({ row: rowNum, error: `${def.label} tag "${tag}" already exists, skipped` });
+            setImportProgress({ current: processed, total: totalPossible });
+            continue;
+          }
+
+          const assetName = isStock ? `${def.label} - Stock` : def.label;
+
+          const assetData: any = {
+            asset_tag: tag,
+            asset_id: tag,
+            name: assetName,
+            serial_number: serial,
+            category_id: def.categoryId,
+            status: isStock ? "available" : "in_use",
+            is_active: true,
+          };
+
+          if (user && !isStock) {
+            assetData.assigned_to = user.id;
+            assetData.checked_out_to = user.id;
+            assetData.checked_out_at = new Date().toISOString();
+          }
+
+          try {
+            const { error: insertErr } = await supabase.from("itam_assets").insert(assetData);
+            if (insertErr) {
+              errors.push({ row: rowNum, error: `${def.label}: ${insertErr.message}` });
+            } else {
+              successCount++;
+              existingTags.add(tag); // prevent intra-batch duplicates
+            }
+          } catch (err: any) {
+            errors.push({ row: rowNum, error: `${def.label}: ${err.message}` });
+          }
+
+          setImportProgress({ current: processed, total: totalPossible });
+        }
+
+        // Log unresolved emails (not stock)
+        if (!isStock && !user && rawEmail) {
+          errors.push({ row: rowNum, error: `Email "${rawEmail}" not found in users table` });
+        }
+      }
+
+      setImportErrors(errors);
+
+      const msg = `Imported ${successCount} peripherals. Skipped: ${skippedNA} NA, ${skippedDup} duplicates.`;
+      if (successCount > 0) toast.success(msg);
+      else toast.info(msg);
+      if (errors.filter((e) => !e.error.includes("already exists") && !e.error.includes("not found")).length > 0) {
+        toast.warning(`${errors.length} rows had warnings/errors`);
+      }
+
+      return { success: successCount, errors };
+    } catch (error: any) {
+      console.error("Peripheral import error:", error);
+      toast.error("Failed to import peripherals: " + error.message);
+      return { success: 0, errors: [] };
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   return {
     exportAssets,
     importAssets,
+    importPeripherals,
     downloadTemplate,
     isExporting,
     isImporting,

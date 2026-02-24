@@ -7,7 +7,6 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -23,7 +22,6 @@ serve(async (req) => {
       }
     );
 
-    // Get the authenticated user
     const {
       data: { user },
       error: userError,
@@ -36,7 +34,6 @@ serve(async (req) => {
       );
     }
 
-    // Get category_id from request body
     const { category_id } = await req.json();
 
     if (!category_id) {
@@ -46,7 +43,7 @@ serve(async (req) => {
       );
     }
 
-    // Get category tag format configuration (no org filtering needed for single-company setup)
+    // Get category tag format configuration
     const { data: tagFormat, error: tagError } = await supabaseClient
       .from('category_tag_formats')
       .select('prefix, current_number, zero_padding')
@@ -71,49 +68,62 @@ serve(async (req) => {
       );
     }
 
-    // Calculate next asset ID and find unique one
-    let currentNumber = tagFormat.current_number;
+    const prefix = tagFormat.prefix;
     const paddingLength = tagFormat.zero_padding || 2;
-    let nextAssetId = '';
-    let isUnique = false;
-    const maxAttempts = 1000; // Prevent infinite loop
-    let attempts = 0;
 
-    // Keep incrementing until we find a unique ID
-    while (!isUnique && attempts < maxAttempts) {
-      const paddedNumber = currentNumber.toString().padStart(paddingLength, '0');
-      nextAssetId = `${tagFormat.prefix}${paddedNumber}`;
+    // Efficient approach: find the highest existing number for this prefix in one query
+    const { data: existingAssets, error: queryError } = await supabaseClient
+      .from('itam_assets')
+      .select('asset_tag')
+      .like('asset_tag', `${prefix}%`)
+      .order('asset_tag', { ascending: false })
+      .limit(100);
 
-      // Check if this ID exists
-      const { data: existingAsset } = await supabaseClient
-        .from('itam_assets')
-        .select('id')
-        .eq('asset_id', nextAssetId)
-        .maybeSingle();
-
-      if (!existingAsset) {
-        isUnique = true;
-      } else {
-        currentNumber++;
-        attempts++;
-      }
-    }
-
-    if (!isUnique) {
+    if (queryError) {
+      console.error('Error querying existing assets:', queryError);
       return new Response(
-        JSON.stringify({ error: 'Could not generate unique asset ID after maximum attempts' }),
+        JSON.stringify({ error: 'Failed to query existing assets' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Reserve the ID by advancing the counter
-    const { error: updateError } = await supabaseClient
-      .from('category_tag_formats')
-      .update({ current_number: currentNumber + 1 })
-      .eq('category_id', category_id);
+    // Extract the highest number from existing asset tags
+    let maxNumber = 0;
+    if (existingAssets && existingAssets.length > 0) {
+      for (const asset of existingAssets) {
+        const tag = asset.asset_tag;
+        if (tag && tag.startsWith(prefix)) {
+          const numPart = tag.substring(prefix.length);
+          const num = parseInt(numPart, 10);
+          if (!isNaN(num) && num > maxNumber) {
+            maxNumber = num;
+          }
+        }
+      }
+    }
 
-    if (updateError) {
-      console.error('Error updating counter:', updateError);
+    const nextNumber = maxNumber + 1;
+
+    const paddedNumber = nextNumber.toString().padStart(paddingLength, '0');
+    const nextAssetId = `${prefix}${paddedNumber}`;
+
+    // Final uniqueness check
+    const { data: duplicate } = await supabaseClient
+      .from('itam_assets')
+      .select('id')
+      .eq('asset_tag', nextAssetId)
+      .maybeSingle();
+
+    if (duplicate) {
+      // If somehow still a duplicate, increment once more
+      const fallbackNumber = nextNumber + 1;
+      const fallbackPadded = fallbackNumber.toString().padStart(paddingLength, '0');
+      const fallbackId = `${prefix}${fallbackPadded}`;
+
+      return new Response(
+        JSON.stringify({ assetId: fallbackId }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     return new Response(

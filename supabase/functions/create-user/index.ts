@@ -173,6 +173,23 @@ Deno.serve(async (req) => {
 
     console.log("User created successfully:", emailLower);
 
+    // Insert audit log for user creation
+    const ipAddress = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || null;
+    await supabaseAdmin.from('audit_logs').insert({
+      action_type: 'user_created',
+      entity_type: 'users',
+      entity_id: createData.user?.id || null,
+      user_id: callerUser.id,
+      ip_address: ipAddress,
+      user_agent: req.headers.get('user-agent') || null,
+      metadata: {
+        target_email: emailLower,
+        created_by_email: callerUser.email,
+        role: role,
+        name: name || null,
+      },
+    });
+
     return new Response(
       JSON.stringify({ 
         success: true, 
