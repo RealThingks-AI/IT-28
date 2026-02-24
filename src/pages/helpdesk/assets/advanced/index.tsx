@@ -14,7 +14,7 @@ import {
   TrendingUp, ClipboardCheck, CheckCircle, ExternalLink, MapPin, FolderTree, 
   Briefcase, Package, Pencil, Trash2, Settings, FileBarChart,
   ChevronLeft, ChevronRight, Tag, Loader2, MoreHorizontal, UserX, PackageX,
-  Send, Eye, UserMinus
+  Send, Eye, UserMinus, ShoppingCart, ScrollText
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { SortableTableHeader, SortConfig } from "@/components/helpdesk/SortableTableHeader";
@@ -30,6 +30,14 @@ import { DocumentsGalleryDialog } from "@/components/helpdesk/assets/DocumentsGa
 import { EmployeeAssetsDialog } from "@/components/helpdesk/assets/EmployeeAssetsDialog";
 import { useOrganisationUsers, OrganisationUser } from "@/hooks/useUsers";
 import AssetReports from "@/pages/helpdesk/assets/reports";
+import PurchaseOrdersList from "@/pages/helpdesk/assets/purchase-orders/index";
+import AssetLogsPage from "@/pages/helpdesk/assets/AssetLogsPage";
+import AssetAudit from "@/pages/helpdesk/assets/audit/index";
+
+// Wrapper components to embed existing pages without their own headers/padding
+const PurchaseOrdersContent = () => <PurchaseOrdersList />;
+const AssetLogsContent = () => <AssetLogsPage />;
+const AssetAuditContent = () => <AssetAudit />;
 
 // Tab configuration for Setup sub-navigation
 const SETUP_TABS = [
@@ -224,7 +232,7 @@ export default function AdvancedPage() {
 
   useEffect(() => {
     const tab = searchParams.get("tab");
-    if (tab && ["employees", "vendors", "maintenances", "warranties", "tools", "setup", "reports"].includes(tab)) {
+    if (tab && ["employees", "vendors", "maintenances", "warranties", "tools", "purchase-orders", "setup", "reports", "logs", "audit"].includes(tab)) {
       setActiveTab(tab);
     }
   }, [searchParams]);
@@ -872,9 +880,21 @@ export default function AdvancedPage() {
               <Upload className="h-3.5 w-3.5" />
               Tools
             </TabsTrigger>
+            <TabsTrigger value="purchase-orders" className="gap-1.5 text-xs">
+              <ShoppingCart className="h-3.5 w-3.5" />
+              Purchase Orders
+            </TabsTrigger>
             <TabsTrigger value="reports" className="gap-1.5 text-xs">
               <FileBarChart className="h-3.5 w-3.5" />
               Reports
+            </TabsTrigger>
+            <TabsTrigger value="logs" className="gap-1.5 text-xs">
+              <ScrollText className="h-3.5 w-3.5" />
+              Logs
+            </TabsTrigger>
+            <TabsTrigger value="audit" className="gap-1.5 text-xs">
+              <ClipboardCheck className="h-3.5 w-3.5" />
+              Audit
             </TabsTrigger>
             <TabsTrigger value="setup" className="gap-1.5 text-xs">
               <Settings className="h-3.5 w-3.5" />
@@ -1415,9 +1435,24 @@ export default function AdvancedPage() {
             </div>
           </TabsContent>
 
+          {/* Purchase Orders Tab */}
+          <TabsContent value="purchase-orders" className="mt-0">
+            <PurchaseOrdersContent />
+          </TabsContent>
+
           {/* Reports Tab */}
           <TabsContent value="reports" className="mt-0">
             <AssetReports />
+          </TabsContent>
+
+          {/* Logs Tab */}
+          <TabsContent value="logs" className="mt-0">
+            <AssetLogsContent />
+          </TabsContent>
+
+          {/* Audit Tab */}
+          <TabsContent value="audit" className="mt-0">
+            <AssetAuditContent />
           </TabsContent>
 
           {/* Setup Tab */}
