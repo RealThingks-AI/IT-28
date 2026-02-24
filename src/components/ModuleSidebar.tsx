@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Home, LucideIcon } from "lucide-react";
+import { ChevronLeft, ChevronRight, LucideIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
@@ -127,35 +127,19 @@ export function ModuleSidebar({ moduleName, moduleIcon: ModuleIcon, items }: Mod
     );
   };
 
-  const homeButton = (
-    <button onClick={() => navigate("/")} className="flex items-center h-8 w-full rounded-lg transition-all duration-200 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/40">
-      <div className="w-12 flex items-center justify-center flex-shrink-0"><Home className="h-4 w-4" /></div>
-      {!collapsed && <span>Back to Home</span>}
-    </button>
-  );
-
   return (
     <aside className="h-screen flex flex-col bg-background transition-all duration-300 ease-in-out border-r border-border shrink-0"
       style={{ width: collapsed ? "48px" : "200px", minWidth: collapsed ? "48px" : "200px", maxWidth: collapsed ? "48px" : "200px" }}>
       
-      {/* Header */}
-      <div className="flex items-center border-b border-border h-11 overflow-hidden">
+      {/* Header - clickable to go home */}
+      <div 
+        className="flex items-center border-b border-border h-11 overflow-hidden cursor-pointer hover:bg-accent/40 transition-colors"
+        onClick={() => navigate("/")}
+      >
         <div className="w-12 h-11 flex items-center justify-center flex-shrink-0">
           <ModuleIcon className="h-5 w-5 text-primary" />
         </div>
         {!collapsed && <span className="text-sm font-semibold text-primary whitespace-nowrap">{moduleName}</span>}
-      </div>
-
-      {/* Home link */}
-      <div className="px-1.5 pt-2 pb-1">
-        {collapsed ? (
-          <TooltipProvider delayDuration={0}>
-            <Tooltip>
-              <TooltipTrigger asChild>{homeButton}</TooltipTrigger>
-              <TooltipContent side="right" sideOffset={8}><p className="text-xs">Back to Home</p></TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        ) : homeButton}
       </div>
 
       {/* Navigation */}
