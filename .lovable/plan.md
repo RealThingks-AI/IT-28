@@ -1,41 +1,48 @@
 
 
-# Streamline Asset Sidebar and Optimize Advanced Section
+# Move Remaining Sidebar Items to Advanced Section
 
 ## Overview
-Remove rarely-used sidebar items (Dispose, Reserve, Purchase Orders, Logs, Audit) from the main navigation and consolidate them into the Advanced section. This creates a cleaner, more industry-standard sidebar with only the most important items visible.
+Remove **Vendors, Licenses, Repairs, Depreciation, Import/Export, and Reports** from the sidebar and ensure they are all accessible as tabs in the Advanced section. After this change, the sidebar will have only **6 items**: Dashboard, All Assets, Add Asset, Check Out, Check In, Advanced.
 
-## Current Sidebar (17 items - too many)
-Dashboard, All Assets, Add Asset, Check Out, Check In, **Dispose**, **Reserve**, Vendors, Licenses, Repairs, **Purchase Orders**, Depreciation, Import/Export, Reports, **Logs**, **Audit**, Advanced
+## Current Sidebar (12 items)
+Dashboard, All Assets, Add Asset, Check Out, Check In, **Vendors**, **Licenses**, **Repairs**, **Depreciation**, **Import/Export**, **Reports**, Advanced
 
-## New Sidebar (12 items - clean and focused)
-Dashboard, All Assets, Add Asset, Check Out, Check In, Vendors, Licenses, Repairs, Depreciation, Import/Export, Reports, Advanced
+## New Sidebar (6 items)
+Dashboard, All Assets, Add Asset, Check Out, Check In, Advanced
+
+## Current Advanced Tabs
+Employees, Vendors, Maintenances, Warranties, Tools, Purchase Orders, Reports, Logs, Audit, Setup
+
+## New Advanced Tabs (adding 4 new)
+Employees, **Licenses**, Vendors, **Repairs**, Maintenances, Warranties, **Depreciation**, Tools, **Import/Export**, Purchase Orders, Reports, Logs, Audit, Setup
 
 ## Changes
 
-### 1. File: `src/layouts/AssetsLayout.tsx`
-- Remove sidebar entries for: Dispose, Reserve, Purchase Orders, Logs, Audit
-- These pages still exist and remain accessible via the Advanced section tabs
+### 1. `src/layouts/AssetsLayout.tsx`
+- Remove sidebar entries for: Vendors, Licenses, Repairs, Depreciation, Import/Export, Reports
+- Remove unused icon imports (Building2, Key, Wrench, TrendingDown, FileDown, BarChart3)
 
-### 2. File: `src/pages/helpdesk/assets/advanced/index.tsx`
-- Add new tabs: "Dispose", "Reserve", "Purchase Orders", "Logs", "Audit"
-- These tabs will simply navigate to their existing pages (`/assets/dispose`, `/assets/reserve`, etc.) OR embed the content inline
-- Since these pages already exist as standalone routes, the simplest approach is to add tabs that redirect to those pages, or add "Logs" and "Audit" as new tabs within Advanced
+### 2. `src/pages/helpdesk/assets/advanced/index.tsx`
+- Import existing page components: `LicensesIndex`, `RepairsIndex`, `DepreciationDashboard`, `ImportExportPage`
+- Add wrapper components for embedding (similar to existing PurchaseOrdersContent pattern)
+- Add 4 new TabsTrigger entries: Licenses, Repairs, Depreciation, Import/Export
+- Add 4 corresponding TabsContent entries that render embedded components
+- Update the valid tabs list in `useEffect` to include `"licenses"`, `"repairs"`, `"depreciation"`, `"import-export"`
+- Add required Lucide icons: `Key`, `TrendingDown`, `FileDown`
 
-**Approach**: Add "Logs", "Audit", and "Purchase Orders" as new tabs in the Advanced page. For "Dispose" and "Reserve", these are action-oriented pages (forms) that work better as standalone -- they'll remain as routes but accessed via the "All Assets" page actions or asset detail page rather than the sidebar.
-
-### 3. Advanced page tab updates
-Current tabs: Employees, Vendors, Maintenances, Warranties, Tools, Reports, Setup
-
-New tabs: Employees, Vendors, Maintenances, Warranties, Tools, Purchase Orders, Reports, Logs, Audit, Setup
+### 3. Routes (`src/App.tsx`)
+- Keep all existing routes intact so direct URL access still works
 
 ### Technical Details
 
-**`src/layouts/AssetsLayout.tsx`** -- Remove 5 sidebar items (Dispose, Reserve, Purchase Orders, Logs, Audit)
+**New imports in advanced/index.tsx:**
+```
+import LicensesIndex from "@/pages/helpdesk/assets/licenses/index";
+import RepairsIndex from "@/pages/helpdesk/assets/repairs/index";
+import DepreciationDashboard from "@/pages/helpdesk/assets/depreciation/index";
+import ImportExportPage from "@/pages/helpdesk/assets/import-export";
+```
 
-**`src/pages/helpdesk/assets/advanced/index.tsx`** -- Add 3 new TabsTrigger entries (Purchase Orders, Logs, Audit) with corresponding TabsContent that lazy-loads the existing page components. Import the existing components:
-- `PurchaseOrdersList` from purchase-orders/index
-- `AssetAudit` from audit/index  
-- `AssetLogs` from AssetLogsPage
+**New tab triggers** will be inserted in logical order among existing tabs, each with an icon and text label matching the existing tab style (gap-1.5 text-xs with h-3.5 w-3.5 icon).
 
-**Routes in `src/App.tsx`** -- Keep all existing routes intact so direct URL access and internal navigation still work.
