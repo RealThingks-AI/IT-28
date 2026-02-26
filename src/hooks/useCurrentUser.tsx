@@ -7,7 +7,6 @@ export interface CurrentUser {
   email: string;
   name: string | null;
   role: string | null;
-  tenantId: number;
 }
 
 /**
@@ -27,7 +26,6 @@ export function useCurrentUser() {
     email: storeEmail || user.email || '',
     name: storeName || user.user_metadata?.name || user.email?.split('@')[0] || null,
     role: storeRole,
-    tenantId: 1,
   } : null;
 
   return {

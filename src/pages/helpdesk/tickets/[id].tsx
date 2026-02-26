@@ -130,9 +130,8 @@ export default function TicketDetail() {
   });
 
   const { data: availableProblems = [] } = useQuery({
-    queryKey: ["helpdesk-problems-for-link", ticket?.tenant_id],
+    queryKey: ["helpdesk-problems-for-link"],
     queryFn: async () => {
-      if (!ticket) return [];
       // @ts-ignore - Bypass complex type inference
       const { data, error } = await supabase
         .from("helpdesk_problems")
@@ -165,17 +164,10 @@ export default function TicketDetail() {
     mutationFn: async (commentText: string) => {
       if (!currentUser || !ticket) return;
 
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("tenant_id")
-        .eq("id", currentUser.id)
-        .maybeSingle();
-
       const { error } = await supabase.from("helpdesk_ticket_comments").insert({
         ticket_id: parseInt(ticketId!),
         user_id: currentUser.id,
         comment: commentText,
-        tenant_id: profileData?.tenant_id || ticket.tenant_id,
         is_internal: isInternalNote,
       });
 
@@ -253,9 +245,7 @@ export default function TicketDetail() {
 
       if (!currentUser) throw new Error("User not found");
 
-      const { data: problemNumber } = await supabase.rpc("generate_problem_number", {
-        p_tenant_id: ticket.tenant_id,
-      });
+      const { data: problemNumber } = await supabase.rpc("generate_problem_number", {});
 
       // @ts-ignore - Bypass complex type inference
       const { data: newProblem, error: problemError } = await supabase
@@ -266,7 +256,6 @@ export default function TicketDetail() {
           description: `Root cause analysis for ticket ${ticket.ticket_number}:\n\n${ticket.description}`,
           priority: ticket.priority,
           status: "investigating",
-          tenant_id: ticket.tenant_id,
           created_by: currentUser.id,
           category_id: ticket.category_id,
         })

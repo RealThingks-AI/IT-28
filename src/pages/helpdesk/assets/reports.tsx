@@ -1,15 +1,18 @@
-import { useMemo } from "react";
+import { useState, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ReportCard } from "@/components/helpdesk/assets/reports/ReportCard";
 import { useAssetReportsData } from "@/hooks/useAssetReportsData";
-import { Loader2, Package, ClipboardCheck, LogOut, Receipt, Wrench, Activity, FileText, Image, MapPin, Building2, Key, Calendar, Users, Trash2, Edit, Plus, ArrowRightLeft, AlertTriangle, Clock, Shield, Archive, Gift, DollarSign, Truck, Search } from "lucide-react";
+import { Loader2, Package, ClipboardCheck, LogOut, Receipt, Wrench, Activity, FileText, Image, MapPin, Building2, Key, Calendar, Users, Trash2, Edit, Plus, ArrowRightLeft, AlertTriangle, Clock, Shield, Archive, Search, CheckCircle, DollarSign, Gift, Truck } from "lucide-react";
 import * as generators from "@/lib/assetReportGenerators";
 
 const AssetReports = () => {
   const [searchParams] = useSearchParams();
   const activeType = searchParams.get("type") || "asset";
   const { data: reportData, isLoading } = useAssetReportsData();
+  const [searchTerm, setSearchTerm] = useState("");
 
   // Report categories configuration
   const reportCategories = useMemo(() => {
@@ -81,18 +84,17 @@ const AssetReports = () => {
           { id: "maint-past-due", title: "Past Due", description: "Overdue maintenance tasks", icon: Clock, count: data.maintenanceSchedules.filter(m => m.next_due_date && new Date(m.next_due_date) < new Date()).length, action: () => generators.generateMaintenancePastDueReport(data) },
         ]
       },
-      {
+        {
         id: "status",
         title: "Status Reports",
         icon: Activity,
         reports: [
-          { id: "under-repair", title: "Assets Under Repair", description: "Currently in repair", icon: Wrench, count: data.assets.filter(a => (a as any).status?.toLowerCase() === "repair").length, action: () => generators.generateStatusReport(data, "repair", "assets_under_repair") },
-          { id: "broken", title: "Broken Assets", description: "Status = broken", icon: AlertTriangle, count: data.assets.filter(a => (a as any).status?.toLowerCase() === "broken").length, action: () => generators.generateStatusReport(data, "broken", "broken_assets") },
-          { id: "disposed", title: "Disposed Assets", description: "Disposed/retired assets", icon: Trash2, count: data.assets.filter(a => (a as any).status?.toLowerCase() === "disposed").length, action: () => generators.generateStatusReport(data, "disposed", "disposed_assets") },
-          { id: "donated", title: "Donated Assets", description: "Donated assets", icon: Gift, count: data.assets.filter(a => (a as any).status?.toLowerCase() === "donated").length, action: () => generators.generateStatusReport(data, "donated", "donated_assets") },
-          { id: "leased", title: "Leased Assets", description: "Leased equipment", icon: Truck, count: data.assets.filter(a => (a as any).status?.toLowerCase() === "leased").length, action: () => generators.generateStatusReport(data, "leased", "leased_assets") },
-          { id: "lost-missing", title: "Lost/Missing Assets", description: "Missing assets", icon: Search, count: data.assets.filter(a => (a as any).status?.toLowerCase() === "lost" || (a as any).status?.toLowerCase() === "missing").length, action: () => generators.generateStatusReport(data, "lost", "lost_assets") },
-          { id: "sold", title: "Sold Assets", description: "Sold assets", icon: DollarSign, count: data.assets.filter(a => (a as any).status?.toLowerCase() === "sold").length, action: () => generators.generateStatusReport(data, "sold", "sold_assets") },
+          { id: "under-repair", title: "Assets Under Repair", description: "Currently in maintenance", icon: Wrench, count: data.assets.filter(a => (a as any).status?.toLowerCase() === "maintenance").length, action: () => generators.generateStatusReport(data, "maintenance", "assets_under_repair") },
+          { id: "retired", title: "Retired Assets", description: "Status = retired", icon: AlertTriangle, count: data.assets.filter(a => (a as any).status?.toLowerCase() === "retired").length, action: () => generators.generateStatusReport(data, "retired", "retired_assets") },
+          { id: "disposed", title: "Disposed Assets", description: "Disposed assets", icon: Trash2, count: data.assets.filter(a => (a as any).status?.toLowerCase() === "disposed").length, action: () => generators.generateStatusReport(data, "disposed", "disposed_assets") },
+          { id: "available", title: "Available Assets", description: "Available/unassigned assets", icon: CheckCircle, count: data.assets.filter(a => (a as any).status?.toLowerCase() === "available").length, action: () => generators.generateStatusReport(data, "available", "available_assets") },
+          { id: "in-use", title: "In Use Assets", description: "Currently assigned/in use", icon: Users, count: data.assets.filter(a => (a as any).status?.toLowerCase() === "in_use").length, action: () => generators.generateStatusReport(data, "in_use", "in_use_assets") },
+          { id: "lost-missing", title: "Lost/Missing Assets", description: "Missing assets", icon: Search, count: data.assets.filter(a => (a as any).status?.toLowerCase() === "lost").length, action: () => generators.generateStatusReport(data, "lost", "lost_assets") },
         ]
       },
       {
@@ -123,48 +125,82 @@ const AssetReports = () => {
   // Find active category based on URL param
   const defaultOpen = reportCategories.find(c => c.id === activeType)?.id || "asset";
 
-  return (
-    <div className="min-h-screen bg-background">
-      <div className="px-4 py-3">
-        <div className="mb-4">
-          <h1 className="text-lg font-semibold">Asset Reports</h1>
-          <p className="text-sm text-muted-foreground">Generate and export comprehensive asset management reports</p>
-        </div>
+  // Filter report categories by search term
+  const filteredCategories = useMemo(() => {
+    if (!searchTerm.trim()) return reportCategories;
+    const term = searchTerm.toLowerCase();
+    return reportCategories
+      .map(cat => ({
+        ...cat,
+        reports: cat.reports.filter(r =>
+          r.title.toLowerCase().includes(term) || r.description.toLowerCase().includes(term)
+        ),
+      }))
+      .filter(cat => cat.reports.length > 0);
+  }, [reportCategories, searchTerm]);
 
+  return (
+    <div className="space-y-4">
+      <div>
         {isLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <div className="space-y-3">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="border rounded-lg p-4 space-y-3">
+                <Skeleton className="h-5 w-48" />
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                  {[...Array(4)].map((_, j) => <Skeleton key={j} className="h-[120px] rounded-lg" />)}
+                </div>
+              </div>
+            ))}
           </div>
         ) : (
-          <Accordion type="single" collapsible defaultValue={defaultOpen} className="space-y-2">
-            {reportCategories.map((category) => (
-              <AccordionItem key={category.id} value={category.id} className="border rounded-lg px-4">
-                <AccordionTrigger className="hover:no-underline py-3">
-                  <div className="flex items-center gap-2">
-                    <category.icon className="h-4 w-4 text-primary" />
-                    <span className="font-medium text-sm">{category.title}</span>
-                    <span className="text-xs text-muted-foreground ml-2">
-                      ({category.reports.length} reports)
-                    </span>
-                  </div>
-                </AccordionTrigger>
-                <AccordionContent className="pt-2 pb-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                    {category.reports.map((report) => (
-                      <ReportCard
-                        key={report.id}
-                        title={report.title}
-                        description={report.description}
-                        icon={report.icon}
-                        count={report.count}
-                        onGenerate={report.action}
-                      />
-                    ))}
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-            ))}
-          </Accordion>
+          <>
+            <div className="relative max-w-sm mb-4">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search reports..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-9 h-8"
+              />
+            </div>
+            {filteredCategories.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <Search className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">No reports match "{searchTerm}"</p>
+              </div>
+            ) : (
+              <Accordion type="single" collapsible defaultValue={defaultOpen} className="space-y-2">
+                {filteredCategories.map((category) => (
+                  <AccordionItem key={category.id} value={category.id} className="border rounded-lg px-4">
+                    <AccordionTrigger className="hover:no-underline py-3">
+                      <div className="flex items-center gap-2">
+                        <category.icon className="h-4 w-4 text-primary" />
+                        <span className="font-medium text-sm">{category.title}</span>
+                        <span className="text-xs text-muted-foreground ml-2">
+                          ({category.reports.length} reports)
+                        </span>
+                      </div>
+                    </AccordionTrigger>
+                    <AccordionContent className="pt-2 pb-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                        {category.reports.map((report) => (
+                          <ReportCard
+                            key={report.id}
+                            title={report.title}
+                            description={report.description}
+                            icon={report.icon}
+                            count={report.count}
+                            onGenerate={report.action}
+                          />
+                        ))}
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                ))}
+              </Accordion>
+            )}
+          </>
         )}
       </div>
     </div>

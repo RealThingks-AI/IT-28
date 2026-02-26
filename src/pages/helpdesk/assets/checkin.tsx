@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { Search, Package, X } from "lucide-react";
+import { invalidateAllAssetQueries } from "@/lib/assetQueryUtils";
 
 const CheckinPage = () => {
   const navigate = useNavigate();
@@ -105,21 +106,24 @@ const CheckinPage = () => {
 
       // Log to history for each asset
       const { data: { user: currentUser } } = await supabase.auth.getUser();
-      for (const assetId of assetIds) {
-        await supabase.from("itam_asset_history").insert({
-          asset_id: assetId,
-          action: "checked_in",
-          details: { notes, returned_at: now },
-          performed_by: currentUser?.id,
-        });
+      const { data: assetRecords } = await supabase
+        .from("itam_assets")
+        .select("id, asset_tag")
+        .in("id", assetIds);
+      
+      const historyEntries = (assetRecords || []).map(asset => ({
+        asset_id: asset.id,
+        action: "checked_in",
+        details: { notes, returned_at: now, asset_tag: asset.asset_tag },
+        performed_by: currentUser?.id,
+      }));
+      if (historyEntries.length > 0) {
+        await supabase.from("itam_asset_history").insert(historyEntries);
       }
     },
     onSuccess: () => {
       toast.success(`${selectedAssignments.length} asset(s) checked in successfully`);
-      queryClient.invalidateQueries({ queryKey: ["itam-assets"] });
-      queryClient.invalidateQueries({ queryKey: ["itam-active-assignments"] });
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets"] });
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets-count"] });
+      invalidateAllAssetQueries(queryClient);
       navigate("/assets/allassets");
     },
     onError: (error: any) => {

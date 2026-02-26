@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { sanitizeSearchInput } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Lightbulb, ExternalLink } from "lucide-react";
@@ -31,7 +32,7 @@ export const SimilarTickets = ({ ticketId, title }: SimilarTicketsProps) => {
         .select("id, ticket_number, title, status, priority, resolved_at")
         .neq("id", ticketId)
         .eq("is_deleted", false)
-        .or(`title.ilike.%${keywords[0]}%,description.ilike.%${keywords[0]}%`)
+        .or(`title.ilike.%${sanitizeSearchInput(keywords[0])}%,description.ilike.%${sanitizeSearchInput(keywords[0])}%`)
         .limit(5);
 
       if (error) throw error;

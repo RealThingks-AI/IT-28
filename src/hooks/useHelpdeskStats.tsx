@@ -6,7 +6,13 @@ const CACHE_KEY = "helpdesk-stats-cache";
 function getCachedStats() {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Validate shape - must have numeric fields
+      if (typeof parsed === "object" && parsed !== null && typeof parsed.total === "number") {
+        return parsed;
+      }
+    }
   } catch { /* ignore */ }
   return undefined;
 }

@@ -47,19 +47,6 @@ export const CategoriesManager = () => {
     is_active: true,
   });
 
-  const { data: currentUser } = useQuery({
-    queryKey: ["current-user-profile"],
-    queryFn: async () => {
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (!authUser) return null;
-      const { data } = await supabase
-        .from("profiles")
-        .select("tenant_id")
-        .eq("id", authUser.id)
-        .maybeSingle();
-      return data;
-    },
-  });
 
   const { data: categories, isLoading } = useQuery({
     queryKey: ["helpdesk-categories-manage"],
@@ -76,8 +63,6 @@ export const CategoriesManager = () => {
 
   const saveMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
-      if (!currentUser?.tenant_id) throw new Error("No tenant ID");
-
       if (editingCategory) {
         const { error } = await supabase
           .from("helpdesk_categories")
@@ -94,7 +79,6 @@ export const CategoriesManager = () => {
           name: data.name,
           description: data.description || null,
           is_active: data.is_active,
-          tenant_id: currentUser.tenant_id,
         });
         if (error) throw error;
       }

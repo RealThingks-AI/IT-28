@@ -24,6 +24,7 @@ export interface CalendarEvent {
   title: string;
   type: "asset_due" | "maintenance" | "contract" | "warranty";
   assetId?: number;
+  assetTag?: string;
 }
 
 interface DashboardCalendarProps {
@@ -61,7 +62,7 @@ export function DashboardCalendar({ events }: DashboardCalendarProps) {
 
   const handleEventClick = (event: CalendarEvent) => {
     if (event.assetId) {
-      navigate(`/assets/detail/${event.assetId}`);
+      navigate(`/assets/detail/${event.assetTag || event.assetId}`);
     } else {
       navigate(`/assets/alerts?type=${event.type}`);
     }

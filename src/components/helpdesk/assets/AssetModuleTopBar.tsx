@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import * as XLSX from "xlsx";
+
 import { AssetColumnSettings, SYSTEM_COLUMN_ORDER } from "./AssetColumnSettings";
 import { useUISettings } from "@/hooks/useUISettings";
 import { toast } from "sonner";
@@ -43,7 +44,7 @@ interface AssetModuleTopBarProps {
 }
 
 // XLSX export utility
-const exportToXLSX = (data: any[], filename: string, columns: { id: string; label: string }[]) => {
+const exportToXLSX = async (data: any[], filename: string, columns: { id: string; label: string }[]) => {
   if (!data || data.length === 0) {
     toast.error("No data to export");
     return;
@@ -85,6 +86,7 @@ const exportToXLSX = (data: any[], filename: string, columns: { id: string; labe
     return row;
   });
 
+  const XLSX = await import("xlsx");
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Assets");
@@ -158,10 +160,10 @@ export function AssetModuleTopBar({
     setLocalSearch("");
   };
 
-  return (
-    <>
-      <div className="sticky top-0 z-10 bg-background/80 backdrop-blur-sm">
-        <div className="flex items-center gap-2 px-6 py-3">
+  const portalTarget = document.getElementById("module-header-portal");
+
+  const topBarContent = (
+        <div className="flex items-center gap-2 flex-1 min-w-0">
           {/* Left side - Search and Add Asset */}
           <div className="flex items-center gap-2">
             {/* Search Bar */}
@@ -171,7 +173,7 @@ export function AssetModuleTopBar({
                 placeholder="Search assets..."
                 value={localSearch}
                 onChange={(e) => setLocalSearch(e.target.value)}
-                className="pl-7 pr-7 h-7 w-[180px] text-xs"
+                className="pl-7 pr-7 h-7 w-[280px] text-xs"
               />
               {localSearch && (
                 <Button
@@ -261,7 +263,7 @@ export function AssetModuleTopBar({
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={bulkActions.handleMaintenance}>
                       <Wrench className="mr-2 h-3.5 w-3.5" />
-                      Maintenance ({selectedCount})
+                      Repair ({selectedCount})
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={bulkActions.handleDispose}>
                       <Package className="mr-2 h-3.5 w-3.5" />
@@ -277,7 +279,15 @@ export function AssetModuleTopBar({
             </DropdownMenu>
           </div>
         </div>
-      </div>
+  );
+
+  return (
+    <>
+      {portalTarget ? createPortal(topBarContent, portalTarget) : (
+        <div className="sticky top-0 z-10 bg-background/80 backdrop-blur-sm px-6 py-3">
+          {topBarContent}
+        </div>
+      )}
 
       <AssetColumnSettings
         open={columnSettingsOpen}

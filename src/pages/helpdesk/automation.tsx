@@ -103,12 +103,6 @@ export default function HelpdeskAutomation() {
     mutationFn: async () => {
       if (!currentUser) throw new Error("Not authenticated");
 
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("tenant_id")
-        .eq("id", currentUser.authUserId)
-        .maybeSingle();
-
       const payload = {
         name,
         description: description || null,
@@ -117,7 +111,6 @@ export default function HelpdeskAutomation() {
         is_active: isActive,
         conditions: {},
         actions: {},
-        tenant_id: profileData?.tenant_id || 1,
         created_by: currentUser.authUserId,
       };
 

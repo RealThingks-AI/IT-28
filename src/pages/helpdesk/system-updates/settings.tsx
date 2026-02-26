@@ -1,34 +1,13 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Copy, Download, Key } from "lucide-react";
-import { Skeleton } from "@/components/ui/skeleton";
 
 export default function UpdateSettings() {
   const [apiKey, setApiKey] = useState("");
-
-  // Single-company mode: show tenant_id
-  const { data: tenantId, isLoading } = useQuery({
-    queryKey: ["tenant-id"],
-    queryFn: async () => {
-      const { data: authData } = await supabase.auth.getUser();
-      if (!authData.user) throw new Error("Not authenticated");
-
-      const { data: profileData, error } = await supabase
-        .from("profiles")
-        .select("tenant_id")
-        .eq("id", authData.user.id)
-        .maybeSingle();
-
-      if (error) throw error;
-      return profileData?.tenant_id ?? 1;
-    },
-  });
 
   const handleCopyApiKey = () => {
     if (apiKey) {
@@ -36,13 +15,6 @@ export default function UpdateSettings() {
       toast.success("API key copied to clipboard");
     } else {
       toast.error("Please generate an API key first");
-    }
-  };
-
-  const handleCopyTenantId = () => {
-    if (tenantId != null) {
-      navigator.clipboard.writeText(String(tenantId));
-      toast.success("Tenant ID copied to clipboard");
     }
   };
 
@@ -63,15 +35,6 @@ export default function UpdateSettings() {
     document.body.removeChild(link);
     toast.success("Agent downloaded successfully");
   };
-
-  if (isLoading) {
-    return (
-      <div className="container mx-auto p-6 space-y-6">
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-96 w-full" />
-      </div>
-    );
-  }
 
   return (
     <div className="container mx-auto p-6 space-y-6">
@@ -125,41 +88,6 @@ export default function UpdateSettings() {
             </div>
           </CardContent>
         </Card>
-
-        {/* Tenant ID */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">Tenant Configuration</CardTitle>
-            <CardDescription>
-              Your tenant identifier for device registration (single-company mode)
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="tenant-id">Tenant ID</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="tenant-id"
-                  type="text"
-                  value={String(tenantId ?? 1)}
-                  readOnly
-                  className="font-mono text-sm bg-muted"
-                />
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={handleCopyTenantId}
-                >
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-            <div className="text-sm text-muted-foreground bg-muted p-3 rounded-md">
-              This value can be used by the device agent to associate device records with the
-              correct tenant.
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Device Agent Download */}
@@ -178,20 +106,10 @@ export default function UpdateSettings() {
             <h4 className="font-semibold">Setup Instructions:</h4>
             <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
               <li>Generate an API key above if you haven't already</li>
-              <li>Copy your Tenant ID</li>
               <li>Download the device-update-agent.ps1 script below</li>
               <li>
-                Edit the script and replace:
-                <ul className="list-disc list-inside ml-6 mt-1">
-                  <li>
-                    <code className="bg-background px-1 py-0.5 rounded">YOUR_API_KEY_HERE</code> with your
-                    API key
-                  </li>
-                  <li>
-                    <code className="bg-background px-1 py-0.5 rounded">YOUR_TENANT_ID_HERE</code> with your
-                    Tenant ID
-                  </li>
-                </ul>
+                Edit the script and replace{" "}
+                <code className="bg-background px-1 py-0.5 rounded">YOUR_API_KEY_HERE</code> with your API key
               </li>
               <li>Run PowerShell as Administrator on target machines</li>
               <li>

@@ -292,7 +292,7 @@ export type Database = {
           is_active?: boolean | null
           last_executed_at?: string | null
           name: string
-          tenant_id: number
+          tenant_id?: number
           trigger_type: string
           updated_at?: string | null
         }
@@ -403,7 +403,7 @@ export type Database = {
           is_deleted?: boolean | null
           name: string
           parent_id?: number | null
-          tenant_id: number
+          tenant_id?: number
           updated_at?: string | null
         }
         Update: {
@@ -518,7 +518,7 @@ export type Database = {
           scheduled_end?: string | null
           scheduled_start?: string | null
           status?: string | null
-          tenant_id: number
+          tenant_id?: number
           title: string
           type?: string | null
           updated_at?: string | null
@@ -674,7 +674,7 @@ export type Database = {
           status?: string | null
           summary?: string | null
           tags?: string[] | null
-          tenant_id: number
+          tenant_id?: number
           title: string
           updated_at?: string | null
           views_count?: number | null
@@ -736,7 +736,7 @@ export type Database = {
           is_active?: boolean | null
           name: string
           parent_id?: number | null
-          tenant_id: number
+          tenant_id?: number
           updated_at?: string | null
         }
         Update: {
@@ -847,7 +847,7 @@ export type Database = {
           root_cause?: string | null
           solution?: string | null
           status?: string | null
-          tenant_id: number
+          tenant_id?: number
           title: string
           updated_at?: string | null
           updated_by?: string | null
@@ -953,7 +953,7 @@ export type Database = {
           is_active?: boolean | null
           name: string
           sla_policy_id?: number | null
-          tenant_id: number
+          tenant_id?: number
           updated_at?: string | null
         }
         Update: {
@@ -1053,7 +1053,7 @@ export type Database = {
           resolution_time_minutes?: number | null
           response_time_hours: number
           response_time_minutes?: number | null
-          tenant_id: number
+          tenant_id?: number
           updated_at?: string | null
         }
         Update: {
@@ -1100,7 +1100,7 @@ export type Database = {
           file_type?: string | null
           file_url: string
           id?: number
-          tenant_id: number
+          tenant_id?: number
           ticket_id: number
           uploaded_at?: string | null
           uploaded_by?: string | null
@@ -1160,7 +1160,7 @@ export type Database = {
           created_at?: string | null
           id?: number
           is_internal?: boolean | null
-          tenant_id: number
+          tenant_id?: number
           ticket_id: number
           updated_at?: string | null
           updated_by?: string | null
@@ -1220,7 +1220,7 @@ export type Database = {
           id?: number
           new_value?: string | null
           old_value?: string | null
-          tenant_id: number
+          tenant_id?: number
           ticket_id: number
           timestamp?: string | null
           user_id?: string | null
@@ -1449,7 +1449,7 @@ export type Database = {
           subcategory?: string | null
           tags?: string[] | null
           team?: string | null
-          tenant_id: number
+          tenant_id?: number
           ticket_number: string
           time_spent_minutes?: number | null
           title: string
@@ -2154,6 +2154,80 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      itam_depreciation_profiles: {
+        Row: {
+          category_id: string | null
+          created_at: string
+          id: string
+          is_active: boolean
+          method: string
+          name: string
+          salvage_value_percent: number
+          updated_at: string
+          useful_life_years: number
+        }
+        Insert: {
+          category_id?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          method?: string
+          name: string
+          salvage_value_percent?: number
+          updated_at?: string
+          useful_life_years?: number
+        }
+        Update: {
+          category_id?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          method?: string
+          name?: string
+          salvage_value_percent?: number
+          updated_at?: string
+          useful_life_years?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "itam_depreciation_profiles_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "itam_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      itam_email_config: {
+        Row: {
+          config_key: string
+          config_type: string
+          config_value: Json
+          created_at: string | null
+          id: string
+          tenant_id: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          config_key: string
+          config_type: string
+          config_value?: Json
+          created_at?: string | null
+          id?: string
+          tenant_id?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          config_key?: string
+          config_type?: string
+          config_value?: Json
+          created_at?: string | null
+          id?: string
+          tenant_id?: number | null
+          updated_at?: string | null
+        }
+        Relationships: []
       }
       itam_license_allocations: {
         Row: {
@@ -3159,7 +3233,7 @@ export type Database = {
           is_active?: boolean | null
           last_name?: string | null
           selected_tools?: string[] | null
-          tenant_id: number
+          tenant_id?: number
           updated_at?: string | null
         }
         Update: {
@@ -4386,25 +4460,28 @@ export type Database = {
             }
             Returns: string
           }
-      generate_asset_tag: { Args: { tenant_id_param: number }; Returns: string }
+      generate_asset_tag: {
+        Args: { tenant_id_param?: number }
+        Returns: string
+      }
       generate_change_number: {
-        Args: { p_org_id?: string; p_tenant_id: number }
+        Args: { p_org_id?: string; p_tenant_id?: number }
         Returns: string
       }
       generate_change_request_number: {
-        Args: { p_tenant_id: number }
+        Args: { p_tenant_id?: number }
         Returns: string
       }
       generate_helpdesk_ticket_number: {
-        Args: { p_org_id?: string; p_tenant_id: number }
+        Args: { p_org_id?: string; p_tenant_id?: number }
         Returns: string
       }
       generate_problem_number: {
-        Args: { p_org_id?: string; p_tenant_id: number }
+        Args: { p_org_id?: string; p_tenant_id?: number }
         Returns: string
       }
       generate_srm_request_number: {
-        Args: { p_org_id: string; p_tenant_id: number }
+        Args: { p_org_id?: string; p_tenant_id?: number }
         Returns: string
       }
       generate_unified_request_number: {

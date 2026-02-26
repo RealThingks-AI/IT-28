@@ -82,15 +82,8 @@ export const CreateTicketDialog = ({ open, onOpenChange }: CreateTicketDialogPro
         throw new Error("User not found in database");
       }
 
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("tenant_id")
-        .eq("id", user.id)
-        .maybeSingle();
-
       return {
         userId: userData.id,
-        tenantId: profileData?.tenant_id || 1,
       };
     },
   });
@@ -119,15 +112,10 @@ export const CreateTicketDialog = ({ open, onOpenChange }: CreateTicketDialogPro
         throw new Error("User information not available. Please try logging in again.");
       }
 
-      // Use tenant_id if available, otherwise default to 1 for org users
-      const tenantId = currentUser.tenantId || 1;
-
-      // Generate ticket number per-tenant
+      // Generate ticket number
       const { data: ticketNumber, error: rpcError } = await supabase.rpc(
         "generate_helpdesk_ticket_number",
-        {
-          p_tenant_id: tenantId,
-        }
+        {}
       );
 
       if (rpcError) {
@@ -141,7 +129,6 @@ export const CreateTicketDialog = ({ open, onOpenChange }: CreateTicketDialogPro
         category_id: values.category_id ? parseInt(values.category_id) : null,
         ticket_number: ticketNumber,
         requester_id: currentUser.userId,
-        tenant_id: tenantId,
         status: "open",
         request_type: values.request_type,
       };

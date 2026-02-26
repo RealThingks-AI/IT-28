@@ -59,19 +59,17 @@ export function EditProblemDialog({ open, onOpenChange, problem }: EditProblemDi
   });
 
   const { data: availableTickets = [] } = useQuery({
-    queryKey: ["helpdesk-tickets-for-link", problem?.tenant_id],
+    queryKey: ["helpdesk-tickets-for-link"],
     queryFn: async () => {
-      if (!problem?.tenant_id) return [];
       const { data, error } = await supabase
         .from("helpdesk_tickets")
         .select("id, ticket_number, title, status, priority")
-        .eq("tenant_id", problem.tenant_id)
         .eq("is_deleted", false)
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data || [];
     },
-    enabled: !!problem?.tenant_id && open,
+    enabled: !!problem?.id && open,
   });
 
   const linkTicket = useMutation({

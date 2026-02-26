@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { useOrganisationUsers } from "@/hooks/useUsers";
+import { useUsers } from "@/hooks/useUsers";
 import { getUserDisplayName } from "@/lib/userUtils";
 
 const AllocateLicense = () => {
@@ -38,8 +38,8 @@ const AllocateLicense = () => {
     },
   });
 
-  // Use centralized organisation users hook
-  const { data: users = [] } = useOrganisationUsers();
+  // Use centralized users hook
+  const { data: users = [] } = useUsers();
 
   // Get assets assigned to selected user
   const { data: assets = [] } = useQuery({

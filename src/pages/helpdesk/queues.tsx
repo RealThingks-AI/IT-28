@@ -122,12 +122,6 @@ export default function HelpdeskQueues() {
     mutationFn: async () => {
       if (!currentUser) throw new Error("Not authenticated");
 
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("tenant_id")
-        .eq("id", currentUser.authUserId)
-        .maybeSingle();
-
       const payload = {
         name,
         description: description || null,
@@ -135,7 +129,6 @@ export default function HelpdeskQueues() {
         assignment_method: assignmentMethod,
         auto_assign: autoAssign,
         sla_policy_id: slaPolicyId ? parseInt(slaPolicyId) : null,
-        tenant_id: profileData?.tenant_id || 1,
         is_active: true,
       };
 

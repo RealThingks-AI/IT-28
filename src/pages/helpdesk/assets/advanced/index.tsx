@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,12 +9,13 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Skeleton } from "@/components/ui/skeleton";
 import { 
-  Search, Plus, Users, Building2, Mail, Phone, Globe, Wrench, Shield, Upload, 
-  TrendingUp, ClipboardCheck, CheckCircle, ExternalLink, MapPin, FolderTree, 
+  Search, Plus, Users, Building2, Mail, Phone, Globe, Wrench, Shield,
+  TrendingUp, CheckCircle, ExternalLink, MapPin, FolderTree, 
   Briefcase, Package, Pencil, Trash2, Settings, FileBarChart,
   ChevronLeft, ChevronRight, Tag, Loader2, MoreHorizontal, UserX, PackageX,
-  Send, Eye, UserMinus, ShoppingCart, ScrollText, Key, TrendingDown, FileDown
+  Send, Eye, ScrollText, Key, TrendingDown, FileDown, Image, FileText
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { SortableTableHeader, SortConfig } from "@/components/helpdesk/SortableTableHeader";
@@ -23,64 +24,300 @@ import { supabase } from "@/integrations/supabase/client";
 import { format, differenceInDays, isPast } from "date-fns";
 import { toast } from "sonner";
 import { useAssetSetupConfig } from "@/hooks/useAssetSetupConfig";
-import { Badge } from "@/components/ui/badge";
 import { EmailsTab } from "@/components/helpdesk/assets/setup/EmailsTab";
-import { PhotoGalleryDialog } from "@/components/helpdesk/assets/PhotoGalleryDialog";
-import { DocumentsGalleryDialog } from "@/components/helpdesk/assets/DocumentsGalleryDialog";
 import { EmployeeAssetsDialog } from "@/components/helpdesk/assets/EmployeeAssetsDialog";
-import { useOrganisationUsers, OrganisationUser } from "@/hooks/useUsers";
+import { useUsers, AppUser } from "@/hooks/useUsers";
 import AssetReports from "@/pages/helpdesk/assets/reports";
-import PurchaseOrdersList from "@/pages/helpdesk/assets/purchase-orders/index";
-import AssetLogsPage from "@/pages/helpdesk/assets/AssetLogsPage";
-import AssetAudit from "@/pages/helpdesk/assets/audit/index";
+
 import LicensesIndex from "@/pages/helpdesk/assets/licenses/index";
-import RepairsIndex from "@/pages/helpdesk/assets/repairs/index";
 import DepreciationDashboard from "@/pages/helpdesk/assets/depreciation/index";
 import ImportExportPage from "@/pages/helpdesk/assets/import-export";
 
+// ─── Inline Documents Components ───────────────────────────────────────────────
+// Photo gallery rendered inline (not as a dialog trigger card)
+const InlinePhotoGallery = () => {
+  const queryClient = useQueryClient();
+  const [deletePhotoConfirm, setDeletePhotoConfirm] = useState<any>(null);
+
+  const { data: assetPhotos, isLoading } = useQuery({
+    queryKey: ["asset-photos-storage"],
+    queryFn: async () => {
+      const { data: assets } = await supabase
+        .from("itam_assets")
+        .select("custom_fields")
+        .eq("is_active", true)
+        .not("custom_fields->>photo_url", "is", null)
+        .limit(1000);
+      const seenUrls = new Set<string>();
+      const dbPhotos: { id: string; name: string; path: string; photo_url: string; created_at: string | null }[] = [];
+      if (assets) {
+        for (const asset of assets) {
+          const photoUrl = (asset.custom_fields as Record<string, unknown>)?.photo_url as string | undefined;
+          if (!photoUrl || seenUrls.has(photoUrl)) continue;
+          if (!photoUrl.includes("supabase") && !photoUrl.includes("storage")) continue;
+          seenUrls.add(photoUrl);
+          const parts = photoUrl.split("/");
+          const name = parts[parts.length - 1] || "unknown";
+          const bucketIdx = photoUrl.indexOf("/asset-photos/");
+          const path = bucketIdx >= 0 ? photoUrl.substring(bucketIdx + "/asset-photos/".length) : `migrated/${name}`;
+          dbPhotos.push({ id: photoUrl, name: decodeURIComponent(name), path, photo_url: photoUrl, created_at: null });
+        }
+      }
+      return dbPhotos;
+    },
+  });
+
+  const deletePhotoMutation = useMutation({
+    mutationFn: async (photo: any) => {
+      const { error: storageError } = await supabase.storage.from("asset-photos").remove([photo.path]);
+      if (storageError) throw storageError;
+      const { data: affectedAssets } = await supabase.from("itam_assets").select("id, custom_fields").eq("is_active", true).not("custom_fields->>photo_url", "is", null);
+      if (affectedAssets) {
+        for (const asset of affectedAssets) {
+          const cf = asset.custom_fields as Record<string, unknown> | null;
+          if (cf?.photo_url === photo.photo_url) {
+            const updatedCf = { ...cf } as Record<string, unknown>;
+            delete updatedCf.photo_url;
+            await supabase.from("itam_assets").update({ custom_fields: updatedCf as any }).eq("id", asset.id);
+          }
+        }
+      }
+    },
+    onSuccess: () => {
+      toast.success("Photo deleted");
+      queryClient.invalidateQueries({ queryKey: ["asset-photos-storage"] });
+    },
+    onError: () => toast.error("Failed to delete photo"),
+  });
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="pt-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Image className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-medium">Photos</span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            {[...Array(6)].map((_, i) => <Skeleton key={i} className="aspect-square rounded-lg" />)}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardContent className="pt-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Image className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-medium">Photos</span>
+          <span className="text-xs text-muted-foreground">({assetPhotos?.length || 0})</span>
+        </div>
+        {(!assetPhotos || assetPhotos.length === 0) ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <Image className="h-8 w-8 mx-auto mb-2 opacity-50" />
+            <p className="text-sm">No photos linked to any assets yet.</p>
+            <p className="text-xs mt-1">Add photos from the asset detail view.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            {assetPhotos.map((photo) => (
+              <div key={photo.photo_url} className="relative group">
+                <div className="aspect-square rounded-lg overflow-hidden bg-muted">
+                  <img src={photo.photo_url} alt={photo.name} className="w-full h-full object-cover hover:scale-105 transition-transform" onError={(e) => { e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100"%3E%3Crect fill="%23ddd" width="100" height="100"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dy=".3em" fill="%23999"%3ENo Image%3C/text%3E%3C/svg%3E'; }} />
+                </div>
+                <Button variant="destructive" size="icon" className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => { if (window.confirm("Delete this photo? This cannot be undone.")) deletePhotoMutation.mutate(photo); }}>
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+                <p className="text-[10px] mt-1 truncate text-muted-foreground" title={photo.name}>{photo.name}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
+
+// Documents list rendered inline
+const InlineDocumentsList = () => {
+  const queryClient = useQueryClient();
+
+  const { data: documents, isLoading } = useQuery({
+    queryKey: ["asset-documents-all"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("itam_asset_documents").select("*").order("created_at", { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  const deleteDocMutation = useMutation({
+    mutationFn: async (doc: any) => {
+      const urlParts = doc.file_path.split("/");
+      const fileName = urlParts[urlParts.length - 1];
+      await supabase.storage.from("asset-documents").remove([fileName]);
+      const { error: dbError } = await supabase.from("itam_asset_documents").delete().eq("id", doc.id);
+      if (dbError) throw dbError;
+    },
+    onSuccess: () => { toast.success("Document deleted"); queryClient.invalidateQueries({ queryKey: ["asset-documents-all"] }); },
+    onError: () => toast.error("Failed to delete document"),
+  });
+
+  const getDocIcon = (mimeType: string | null) => {
+    if (!mimeType) return FileText;
+    if (mimeType.includes("image")) return Image;
+    return FileText;
+  };
+
+  const formatFileSize = (bytes: number | null) => {
+    if (!bytes) return "—";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="pt-4">
+          <div className="flex items-center gap-2 mb-3">
+            <FileText className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-medium">Documents</span>
+          </div>
+          <div className="space-y-2">
+            {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-12 rounded-md" />)}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardContent className="pt-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <FileText className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-medium">Documents</span>
+          <span className="text-xs text-muted-foreground">({documents?.length || 0})</span>
+          <p className="ml-auto text-[10px] text-muted-foreground">Add documents from the asset detail Docs tab</p>
+        </div>
+        {(!documents || documents.length === 0) ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
+            <p className="text-sm">No documents available.</p>
+          </div>
+        ) : (
+          <div className="divide-y rounded-md border">
+            {documents.map((doc: any) => {
+              const DocIcon = getDocIcon(doc.mime_type);
+              return (
+                <div key={doc.id} className="flex items-center gap-3 p-2.5 hover:bg-muted/50 transition-colors">
+                  <div className="w-8 h-8 rounded bg-muted flex items-center justify-center flex-shrink-0">
+                    <DocIcon className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm truncate">{doc.name}</p>
+                    <p className="text-[10px] text-muted-foreground">{formatFileSize(doc.file_size)} • {doc.created_at ? format(new Date(doc.created_at), "MMM dd, yyyy") : "—"}</p>
+                  </div>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => window.open(doc.file_path, "_blank")}>
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </Button>
+                   <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => { if (window.confirm("Delete this document? This cannot be undone.")) deleteDocMutation.mutate(doc); }}>
+                     <Trash2 className="h-3.5 w-3.5" />
+                   </Button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
+
+// Documents stats with loading skeleton
+const DocumentsStats = () => {
+  const { data: docCount = 0, isLoading: loadingDocs } = useQuery({
+    queryKey: ["itam-docs-count"],
+    queryFn: async () => {
+      const { count, error } = await supabase.from("itam_asset_documents").select("*", { count: "exact", head: true });
+      if (error) throw error;
+      return count || 0;
+    },
+  });
+
+  const { data: photoCount = 0, isLoading: loadingPhotos } = useQuery({
+    queryKey: ["itam-photos-count"],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from("itam_assets")
+        .select("*", { count: "exact", head: true })
+        .not("custom_fields->>photo_url", "is", null)
+        .neq("custom_fields->>photo_url", "");
+      if (error) return 0;
+      return count || 0;
+    },
+  });
+
+  const { data: assetsWithMedia = 0, isLoading: loadingMedia } = useQuery({
+    queryKey: ["itam-assets-with-media"],
+    queryFn: async () => {
+      const { data: docAssets } = await supabase.from("itam_asset_documents").select("asset_id");
+      const docSet = new Set((docAssets || []).map(d => d.asset_id).filter(id => id && id !== "00000000-0000-0000-0000-000000000000"));
+      const { data: photoAssets } = await supabase
+        .from("itam_assets")
+        .select("id")
+        .not("custom_fields->>photo_url", "is", null)
+        .neq("custom_fields->>photo_url", "");
+      (photoAssets || []).forEach(a => docSet.add(a.id));
+      return docSet.size;
+    },
+  });
+
+  const isLoading = loadingDocs || loadingPhotos || loadingMedia;
+
+  if (isLoading) {
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-[68px] rounded-lg" />)}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+      <StatCard icon={Image} value={photoCount} label="Total Photos" colorClass="bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" />
+      <StatCard icon={FileText} value={docCount} label="Total Documents" colorClass="bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" />
+      <StatCard icon={Package} value={assetsWithMedia} label="Assets with Media" colorClass="bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400" />
+    </div>
+  );
+};
+
 // Wrapper components to embed existing pages without their own headers/padding
-const PurchaseOrdersContent = () => <PurchaseOrdersList />;
-const AssetLogsContent = () => <AssetLogsPage />;
-const AssetAuditContent = () => <AssetAudit />;
-const LicensesContent = () => <LicensesIndex />;
-const RepairsContent = () => <RepairsIndex />;
-const DepreciationContent = () => <DepreciationDashboard />;
-const ImportExportContent = () => <ImportExportPage />;
+const LicensesContent = () => <LicensesIndex embedded />;
+const DepreciationContent = () => <DepreciationDashboard embedded />;
+const ImportExportContent = () => <ImportExportPage embedded />;
+
 
 // Tab configuration for Setup sub-navigation
 const SETUP_TABS = [
-  { id: "sites", label: "Sites & Locations", icon: MapPin },
-  { id: "categories", label: "Categories", icon: FolderTree },
-  { id: "departments", label: "Departments", icon: Briefcase },
-  { id: "makes", label: "Makes", icon: Package },
-  { id: "emails", label: "Emails", icon: Mail },
+  { id: "sites", label: "Sites & Locations" },
+  { id: "categories", label: "Categories" },
+  { id: "departments", label: "Departments" },
+  { id: "makes", label: "Makes" },
+  { id: "emails", label: "Emails" },
 ] as const;
 
 type SetupTabId = typeof SETUP_TABS[number]["id"];
 
-const ITEMS_PER_PAGE = 20;
+const ITEMS_PER_PAGE = 50;
 
-// Reusable stat card component for consistency
-const StatCard = ({ icon: Icon, value, label, colorClass, onClick, active }: { 
-  icon: React.ElementType; 
-  value: number | string; 
-  label: string; 
-  colorClass: string;
-  onClick?: () => void;
-  active?: boolean;
-}) => (
-  <Card className={`${onClick ? "cursor-pointer hover:shadow-lg transition-shadow" : ""} ${active ? "ring-2 ring-primary" : ""}`} onClick={onClick}>
-    <CardContent className="p-3 flex items-center gap-3">
-      <div className={`p-2 rounded-lg ${colorClass}`}>
-        <Icon className="h-4 w-4" />
-      </div>
-      <div>
-        <p className="text-xl font-bold">{value}</p>
-        <p className="text-xs text-muted-foreground">{label}</p>
-      </div>
-    </CardContent>
-  </Card>
-);
+// Reusable stat card component — compact, no hover shadow per design philosophy
+// Re-export shared StatCard for backward compatibility
+import { StatCard } from "@/components/helpdesk/assets/StatCard";
+export { StatCard };
 
 // Status dot indicator
 const StatusDot = ({ status, label }: { status: "active" | "inactive" | "pending" | "in_progress" | "completed" | "cancelled" | "expired" | "expiring"; label: string }) => {
@@ -104,17 +341,20 @@ const StatusDot = ({ status, label }: { status: "active" | "inactive" | "pending
 };
 
 // Pagination component
-const Pagination = ({ currentPage, totalPages, onPageChange }: { currentPage: number; totalPages: number; onPageChange: (page: number) => void }) => {
+const PaginationControls = ({ currentPage, totalPages, totalItems, itemsPerPage, onPageChange }: { currentPage: number; totalPages: number; totalItems: number; itemsPerPage: number; onPageChange: (page: number) => void }) => {
   if (totalPages <= 1) return null;
+  const start = (currentPage - 1) * itemsPerPage + 1;
+  const end = Math.min(currentPage * itemsPerPage, totalItems);
   return (
     <div className="flex items-center justify-between pt-3 px-1">
       <p className="text-xs text-muted-foreground">
-        Page {currentPage} of {totalPages}
+        Showing {start}–{end} of {totalItems}
       </p>
       <div className="flex items-center gap-1">
         <Button variant="outline" size="icon" className="h-7 w-7" disabled={currentPage <= 1} onClick={() => onPageChange(currentPage - 1)}>
           <ChevronLeft className="h-3.5 w-3.5" />
         </Button>
+        <span className="text-xs text-muted-foreground px-2">Page {currentPage} of {totalPages}</span>
         <Button variant="outline" size="icon" className="h-7 w-7" disabled={currentPage >= totalPages} onClick={() => onPageChange(currentPage + 1)}>
           <ChevronRight className="h-3.5 w-3.5" />
         </Button>
@@ -123,12 +363,54 @@ const Pagination = ({ currentPage, totalPages, onPageChange }: { currentPage: nu
   );
 };
 
+// CSV export utility
+const exportCSV = (rows: Record<string, string | number>[], filename: string) => {
+  if (rows.length === 0) { toast.info("No data to export"); return; }
+  const headers = Object.keys(rows[0]);
+  const csvContent = [
+    headers.join(","),
+    ...rows.map(row => headers.map(h => `"${String(row[h] ?? "").replace(/"/g, '""')}"`).join(","))
+  ].join("\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${filename}_${new Date().toISOString().split("T")[0]}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+  toast.success(`Exported ${rows.length} records`);
+};
+
+const VALID_TABS = ["employees", "vendors", "licenses", "repairs", "warranties", "depreciation", "documents", "import-export", "reports", "setup"] as const;
+
 export default function AdvancedPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [searchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState("employees");
-  const [setupSubTab, setSetupSubTab] = useState<SetupTabId>("sites");
+  const [searchParams, setSearchParams] = useSearchParams();
+  
+  // ─── URL-synced tab state (Phase 1: B4, B5, Phase 3: F20) ─────────────────
+  const urlTab = searchParams.get("tab");
+  const urlSection = searchParams.get("section");
+  const activeTab = urlTab && (VALID_TABS as readonly string[]).includes(urlTab) ? urlTab : "employees";
+  const setupSubTab: SetupTabId = (urlSection && SETUP_TABS.some(t => t.id === urlSection) ? urlSection : "sites") as SetupTabId;
+
+  const setActiveTab = useCallback((tab: string) => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.set("tab", tab);
+      if (tab !== "setup") next.delete("section");
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const setSetupSubTab = useCallback((section: SetupTabId) => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.set("tab", "setup");
+      next.set("section", section);
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
   
   // Isolated search/filter state per tab
   const [employeeSearch, setEmployeeSearch] = useState("");
@@ -138,17 +420,22 @@ export default function AdvancedPage() {
   const [warrantySearch, setWarrantySearch] = useState("");
   const [warrantyStatusFilter, setWarrantyStatusFilter] = useState("all");
 
-  // Employees: sorting, role/status filters
+  // Sorting state
   const [employeeSort, setEmployeeSort] = useState<SortConfig>({ column: "name", direction: "asc" });
+  const [vendorSort, setVendorSort] = useState<SortConfig>({ column: "name", direction: "asc" });
+  const [repairSort, setRepairSort] = useState<SortConfig>({ column: "created_at", direction: "desc" });
+  const [warrantySort, setWarrantySort] = useState<SortConfig>({ column: "warranty_expiry", direction: "asc" });
   const [employeeRoleFilter, setEmployeeRoleFilter] = useState("all");
   const [employeeStatusFilter, setEmployeeStatusFilter] = useState("all");
 
   // Pagination state
   const [employeePage, setEmployeePage] = useState(1);
   const [vendorPage, setVendorPage] = useState(1);
+  const [maintenancePage, setMaintenancePage] = useState(1);
+  const [warrantyPage, setWarrantyPage] = useState(1);
   
   // Employee assets dialog
-  const [selectedEmployee, setSelectedEmployee] = useState<OrganisationUser | null>(null);
+  const [selectedEmployee, setSelectedEmployee] = useState<AppUser | null>(null);
   const [employeeDialogOpen, setEmployeeDialogOpen] = useState(false);
   
   // Setup config for sites, locations, etc.
@@ -190,6 +477,24 @@ export default function AdvancedPage() {
       return (data || []).map((a) => a.asset_tag).filter(Boolean) as string[];
     },
     enabled: activeTab === "setup" && setupSubTab === "categories",
+  });
+
+  // ─── Asset counts for setup items (Phase 3: F5) ─────────────────────────────
+  const { data: setupAssetCounts = { category: {}, department: {}, location: {}, make: {} } } = useQuery({
+    queryKey: ["setup-asset-counts"],
+    queryFn: async () => {
+      const { data } = await supabase.from("itam_assets").select("category_id, department_id, location_id, make_id").eq("is_active", true);
+      const counts = { category: {} as Record<string, number>, department: {} as Record<string, number>, location: {} as Record<string, number>, make: {} as Record<string, number> };
+      (data || []).forEach(a => {
+        if (a.category_id) counts.category[a.category_id] = (counts.category[a.category_id] || 0) + 1;
+        if (a.department_id) counts.department[a.department_id] = (counts.department[a.department_id] || 0) + 1;
+        if (a.location_id) counts.location[a.location_id] = (counts.location[a.location_id] || 0) + 1;
+        if (a.make_id) counts.make[a.make_id] = (counts.make[a.make_id] || 0) + 1;
+      });
+      return counts;
+    },
+    enabled: activeTab === "setup",
+    staleTime: 5 * 60 * 1000,
   });
 
   const getNextNumberForPrefix = (prefix: string): number => {
@@ -238,19 +543,26 @@ export default function AdvancedPage() {
     onError: (error: Error) => toast.error("Failed: " + error.message),
   });
 
-  useEffect(() => {
-    const tab = searchParams.get("tab");
-    if (tab && ["employees", "licenses", "vendors", "repairs", "maintenances", "warranties", "depreciation", "tools", "import-export", "purchase-orders", "setup", "reports", "logs", "audit"].includes(tab)) {
-      setActiveTab(tab);
-    }
-  }, [searchParams]);
-
   // Reset pagination on search change
   useEffect(() => { setEmployeePage(1); }, [employeeSearch]);
   useEffect(() => { setVendorPage(1); }, [vendorSearch]);
+  useEffect(() => { setMaintenancePage(1); }, [maintenanceSearch, maintenanceStatusFilter]);
+  useEffect(() => { setWarrantyPage(1); }, [warrantySearch, warrantyStatusFilter]);
 
-  // Fetch users/employees using the simplified hook
-  const { data: employees = [], isLoading: loadingEmployees } = useOrganisationUsers();
+  // Fetch ALL users (active + inactive) for the employees tab
+  const { data: employees = [], isLoading: loadingEmployees } = useQuery({
+    queryKey: ["app-users-all"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("users")
+        .select("id, auth_user_id, name, email, role, status")
+        .order("name");
+      if (error) { console.error("Failed to fetch users:", error); return []; }
+      return (data || []) as AppUser[];
+    },
+    enabled: activeTab === "employees",
+    staleTime: 2 * 60 * 1000,
+  });
 
   // Fetch asset counts for employees
   const { data: assetCounts = {} } = useQuery({
@@ -274,7 +586,7 @@ export default function AdvancedPage() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const getEmployeeAssetCount = (emp: OrganisationUser) => {
+  const getEmployeeAssetCount = (emp: AppUser) => {
     return (assetCounts[emp.id] || 0) + 
       (emp.auth_user_id && emp.auth_user_id !== emp.id 
         ? (assetCounts[emp.auth_user_id] || 0) 
@@ -307,7 +619,7 @@ export default function AdvancedPage() {
         .order("created_at", { ascending: false });
       return data || [];
     },
-    enabled: activeTab === "maintenances",
+    enabled: activeTab === "repairs",
     staleTime: 5 * 60 * 1000,
   });
 
@@ -332,14 +644,33 @@ export default function AdvancedPage() {
     const daysUntil = differenceInDays(expiry, new Date());
     if (isPast(expiry)) {
       return { status: "expired", label: "Expired", variant: "destructive" as const, days: Math.abs(daysUntil) };
-    } else if (daysUntil <= 30) {
+    } else if (daysUntil <= 60) {
       return { status: "expiring", label: "Expiring Soon", variant: "outline" as const, days: daysUntil };
     } else {
       return { status: "active", label: "Active", variant: "secondary" as const, days: daysUntil };
     }
   };
 
-  // Filter data
+  // Vendor asset counts query
+  const { data: vendorAssetCounts = {} } = useQuery({
+    queryKey: ["vendor-asset-counts"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("itam_assets")
+        .select("vendor_id")
+        .eq("is_active", true)
+        .not("vendor_id", "is", null);
+      const counts: Record<string, number> = {};
+      data?.forEach((a) => {
+        if (a.vendor_id) counts[a.vendor_id] = (counts[a.vendor_id] || 0) + 1;
+      });
+      return counts;
+    },
+    enabled: activeTab === "vendors",
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Filter & sort employees
   const filteredEmployees = employees
     .filter((emp) => {
       if (employeeStatusFilter !== "all" && emp.status !== employeeStatusFilter) return false;
@@ -369,13 +700,31 @@ export default function AdvancedPage() {
     }));
   };
 
-  const filteredVendors = vendors.filter((vendor) =>
-    vendorSearch
-      ? vendor.name.toLowerCase().includes(vendorSearch.toLowerCase()) ||
-        vendor.contact_email?.toLowerCase().includes(vendorSearch.toLowerCase())
-      : true
-  );
+  // Filter & sort vendors
+  const filteredVendors = vendors
+    .filter((vendor) =>
+      vendorSearch
+        ? vendor.name.toLowerCase().includes(vendorSearch.toLowerCase()) ||
+          vendor.contact_email?.toLowerCase().includes(vendorSearch.toLowerCase())
+        : true
+    )
+    .sort((a, b) => {
+      const { column, direction } = vendorSort;
+      if (!direction) return 0;
+      const mult = direction === "asc" ? 1 : -1;
+      const valA = ((a as any)[column] || "") as string;
+      const valB = ((b as any)[column] || "") as string;
+      return valA.localeCompare(valB) * mult;
+    });
 
+  const handleVendorSort = (column: string) => {
+    setVendorSort(prev => ({
+      column,
+      direction: prev.column === column ? (prev.direction === "asc" ? "desc" : prev.direction === "desc" ? null : "asc") : "asc",
+    }));
+  };
+
+  // Filter & sort repairs (Phase 3: F4)
   const filteredMaintenances = maintenances.filter(m => {
     if (maintenanceStatusFilter !== "all" && m.status !== maintenanceStatusFilter) return false;
     if (!maintenanceSearch) return true;
@@ -386,8 +735,31 @@ export default function AdvancedPage() {
       m.issue_description?.toLowerCase().includes(searchLower) ||
       m.repair_number?.toLowerCase().includes(searchLower)
     );
+  }).sort((a, b) => {
+    const { column, direction } = repairSort;
+    if (!direction) return 0;
+    const mult = direction === "asc" ? 1 : -1;
+    if (column === "days_open") {
+      const daysA = a.status !== "completed" && a.status !== "cancelled" && a.created_at ? differenceInDays(new Date(), new Date(a.created_at)) : 0;
+      const daysB = b.status !== "completed" && b.status !== "cancelled" && b.created_at ? differenceInDays(new Date(), new Date(b.created_at)) : 0;
+      return (daysA - daysB) * mult;
+    }
+    if (column === "asset") {
+      return ((a.asset?.name || "").localeCompare(b.asset?.name || "")) * mult;
+    }
+    const valA = String((a as any)[column] || "");
+    const valB = String((b as any)[column] || "");
+    return valA.localeCompare(valB) * mult;
   });
 
+  const handleRepairSort = (column: string) => {
+    setRepairSort(prev => ({
+      column,
+      direction: prev.column === column ? (prev.direction === "asc" ? "desc" : prev.direction === "desc" ? null : "asc") : "asc",
+    }));
+  };
+
+  // Filter & sort warranties (Phase 3: F4)
   const filteredWarranties = assetsWithWarranty.filter(asset => {
     if (warrantyStatusFilter !== "all") {
       const warrantyInfo = getWarrantyStatus(asset.warranty_expiry);
@@ -402,7 +774,29 @@ export default function AdvancedPage() {
       if (!matchesSearch) return false;
     }
     return true;
+  }).sort((a, b) => {
+    const { column, direction } = warrantySort;
+    if (!direction) return 0;
+    const mult = direction === "asc" ? 1 : -1;
+    if (column === "days") {
+      const daysA = getWarrantyStatus(a.warranty_expiry).days;
+      const daysB = getWarrantyStatus(b.warranty_expiry).days;
+      return (daysA - daysB) * mult;
+    }
+    if (column === "category") {
+      return ((a as any).category?.name || "").localeCompare((b as any).category?.name || "") * mult;
+    }
+    const valA = String((a as any)[column] || "");
+    const valB = String((b as any)[column] || "");
+    return valA.localeCompare(valB) * mult;
   });
+
+  const handleWarrantySort = (column: string) => {
+    setWarrantySort(prev => ({
+      column,
+      direction: prev.column === column ? (prev.direction === "asc" ? "desc" : prev.direction === "desc" ? null : "asc") : "asc",
+    }));
+  };
 
   // Paginated slices
   const employeeTotalPages = Math.ceil(filteredEmployees.length / ITEMS_PER_PAGE);
@@ -411,8 +805,15 @@ export default function AdvancedPage() {
   const vendorTotalPages = Math.ceil(filteredVendors.length / ITEMS_PER_PAGE);
   const paginatedVendors = filteredVendors.slice((vendorPage - 1) * ITEMS_PER_PAGE, vendorPage * ITEMS_PER_PAGE);
 
+  const maintenanceTotalPages = Math.ceil(filteredMaintenances.length / ITEMS_PER_PAGE);
+  const paginatedMaintenances = filteredMaintenances.slice((maintenancePage - 1) * ITEMS_PER_PAGE, maintenancePage * ITEMS_PER_PAGE);
+
+  const warrantyTotalPages = Math.ceil(filteredWarranties.length / ITEMS_PER_PAGE);
+  const paginatedWarranties = filteredWarranties.slice((warrantyPage - 1) * ITEMS_PER_PAGE, warrantyPage * ITEMS_PER_PAGE);
+
   const getMaintenanceStatusDot = (status: string) => {
     const map: Record<string, { status: "pending" | "in_progress" | "completed" | "cancelled"; label: string }> = {
+      open: { status: "pending", label: "Open" },
       pending: { status: "pending", label: "Pending" },
       in_progress: { status: "in_progress", label: "In Progress" },
       completed: { status: "completed", label: "Completed" },
@@ -462,7 +863,6 @@ export default function AdvancedPage() {
       if (!user) throw new Error("Not authenticated");
       const tableName = getTableName(dialogType);
       if (dialogMode === "add") {
-        // Check for duplicate name (case-insensitive) for categories
         if (dialogType === "category") {
           const { data: existing } = await supabase
             .from("itam_categories")
@@ -491,6 +891,7 @@ export default function AdvancedPage() {
       queryClient.invalidateQueries({ queryKey: ["itam-categories"] });
       queryClient.invalidateQueries({ queryKey: ["itam-departments"] });
       queryClient.invalidateQueries({ queryKey: ["itam-makes"] });
+      queryClient.invalidateQueries({ queryKey: ["setup-asset-counts"] });
       setDialogOpen(false);
     },
     onError: (error: Error) => {
@@ -514,6 +915,7 @@ export default function AdvancedPage() {
       queryClient.invalidateQueries({ queryKey: ["itam-categories"] });
       queryClient.invalidateQueries({ queryKey: ["itam-departments"] });
       queryClient.invalidateQueries({ queryKey: ["itam-makes"] });
+      queryClient.invalidateQueries({ queryKey: ["setup-asset-counts"] });
       setDeleteDialogOpen(false);
       setItemToDelete(null);
     },
@@ -524,14 +926,14 @@ export default function AdvancedPage() {
   });
 
   // Stats calculations
-  const maintenancePending = maintenances.filter(m => m.status === "pending").length;
+  const maintenancePending = maintenances.filter(m => m.status === "open" || m.status === "pending").length;
   const maintenanceInProgress = maintenances.filter(m => m.status === "in_progress").length;
   const maintenanceCompleted = maintenances.filter(m => m.status === "completed").length;
   const warrantyExpiring = assetsWithWarranty.filter(a => getWarrantyStatus(a.warranty_expiry).status === "expiring").length;
   const warrantyExpired = assetsWithWarranty.filter(a => getWarrantyStatus(a.warranty_expiry).status === "expired").length;
   const warrantyActive = assetsWithWarranty.filter(a => getWarrantyStatus(a.warranty_expiry).status === "active").length;
 
-  const handleViewEmployeeAssets = (employee: OrganisationUser) => {
+  const handleViewEmployeeAssets = (employee: AppUser) => {
     setSelectedEmployee(employee);
     setEmployeeDialogOpen(true);
   };
@@ -547,11 +949,23 @@ export default function AdvancedPage() {
   };
 
   const getSetupType = () => {
-    const typeMap: Record<SetupTabId, string> = {
+    const typeMap: Record<string, string> = {
       sites: "site", categories: "category",
-      departments: "department", makes: "make", emails: "",
+      departments: "department", makes: "make", emails: "", "activity-log": "",
     };
-    return typeMap[setupSubTab];
+    return typeMap[setupSubTab] || "";
+  };
+
+  // Get asset count for a setup item
+  const getSetupItemAssetCount = (type: string, id: string): number => {
+    const countMap: Record<string, Record<string, number>> = {
+      site: setupAssetCounts.location,
+      location: setupAssetCounts.location,
+      category: setupAssetCounts.category,
+      department: setupAssetCounts.department,
+      make: setupAssetCounts.make,
+    };
+    return countMap[type]?.[id] || 0;
   };
 
   const renderSetupTable = (items: any[], type: string) => (
@@ -560,6 +974,7 @@ export default function AdvancedPage() {
         <TableRow>
           <TableHead className="font-medium text-xs uppercase text-muted-foreground">Name</TableHead>
           {type === "location" && <TableHead className="font-medium text-xs uppercase text-muted-foreground">Site</TableHead>}
+          <TableHead className="font-medium text-xs uppercase text-muted-foreground">Assets</TableHead>
           <TableHead className="font-medium text-xs uppercase text-muted-foreground">Status</TableHead>
           <TableHead className="font-medium text-xs uppercase text-muted-foreground text-right">Actions</TableHead>
         </TableRow>
@@ -567,7 +982,7 @@ export default function AdvancedPage() {
       <TableBody>
         {items.length === 0 ? (
           <TableRow>
-            <TableCell colSpan={type === "location" ? 4 : 3} className="text-center py-8 text-muted-foreground">
+            <TableCell colSpan={type === "location" ? 5 : 4} className="text-center py-8 text-muted-foreground">
               No {type}s found. Click "Add {type}" to create one.
             </TableCell>
           </TableRow>
@@ -580,6 +995,7 @@ export default function AdvancedPage() {
                   {item.site_id ? (sites.find(s => s.id === item.site_id)?.name || "-") : <span className="text-muted-foreground">-</span>}
                 </TableCell>
               )}
+              <TableCell className="text-sm text-muted-foreground">{getSetupItemAssetCount(type, item.id)}</TableCell>
               <TableCell><StatusDot status="active" label="Active" /></TableCell>
               <TableCell className="text-right">
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditDialog(type, item)}>
@@ -599,24 +1015,16 @@ export default function AdvancedPage() {
   const renderCategoriesTable = () => (
     <>
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between border-b pb-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-primary/10">
-              <FolderTree className="h-4 w-4 text-primary" />
-            </div>
-            <div>
-              <CardTitle className="text-base">Categories</CardTitle>
-              <CardDescription className="text-xs">
-                Manage asset categories and tag format prefixes
-              </CardDescription>
+        <CardContent className="pt-4 space-y-4">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-sm font-medium text-muted-foreground">Manage asset categories and tag format prefixes</span>
+            <div className="ml-auto">
+              <Button size="sm" onClick={() => openAddDialog("category")}>
+                <Plus className="h-3 w-3 mr-2" />
+                Add Category
+              </Button>
             </div>
           </div>
-          <Button size="sm" onClick={() => openAddDialog("category")}>
-            <Plus className="h-3 w-3 mr-2" />
-            Add Category
-          </Button>
-        </CardHeader>
-        <CardContent className="p-0">
           <Table>
             <TableHeader className="bg-muted/50">
               <TableRow>
@@ -624,6 +1032,7 @@ export default function AdvancedPage() {
                 <TableHead className="font-medium text-xs uppercase text-muted-foreground">Prefix</TableHead>
                 <TableHead className="font-medium text-xs uppercase text-muted-foreground">Padding</TableHead>
                 <TableHead className="font-medium text-xs uppercase text-muted-foreground">Next Tag (Preview)</TableHead>
+                <TableHead className="font-medium text-xs uppercase text-muted-foreground">Assets</TableHead>
                 <TableHead className="font-medium text-xs uppercase text-muted-foreground">Status</TableHead>
                 <TableHead className="font-medium text-xs uppercase text-muted-foreground text-right">Actions</TableHead>
               </TableRow>
@@ -631,7 +1040,7 @@ export default function AdvancedPage() {
             <TableBody>
               {categories.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                     No categories found. Click "Add Category" to create one.
                   </TableCell>
                 </TableRow>
@@ -642,7 +1051,7 @@ export default function AdvancedPage() {
                     <TableRow key={cat.id}>
                       <TableCell className="font-medium">{cat.name}</TableCell>
                       <TableCell>
-                        {tf ? <Badge variant="secondary">{tf.prefix}</Badge> : <span className="text-muted-foreground text-sm">—</span>}
+                        {tf ? <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{tf.prefix}</code> : <span className="text-muted-foreground text-sm">—</span>}
                       </TableCell>
                       <TableCell>{tf ? tf.zero_padding : "—"}</TableCell>
                       <TableCell>
@@ -654,6 +1063,7 @@ export default function AdvancedPage() {
                           <span className="text-muted-foreground text-sm">Not configured</span>
                         )}
                       </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{getSetupItemAssetCount("category", cat.id)}</TableCell>
                       <TableCell><StatusDot status="active" label="Active" /></TableCell>
                       <TableCell className="text-right space-x-1">
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditDialog("category", cat)} title="Edit name">
@@ -712,59 +1122,45 @@ export default function AdvancedPage() {
   );
 
   const renderSitesLocationsTable = () => {
-    // Build unified rows: sites first, then locations grouped by parent site
     type UnifiedRow = { id: string; name: string; rowType: "site" | "location"; parentSiteName: string | null; site_id?: string | null };
     const rows: UnifiedRow[] = [];
 
-    // Add all sites
     sites.forEach((s) => rows.push({ id: s.id, name: s.name, rowType: "site", parentSiteName: null }));
 
-    // Add locations grouped by parent site (sites with children first, then orphans)
     const locationsWithSite = locations.filter((l) => l.site_id);
     const locationsWithoutSite = locations.filter((l) => !l.site_id);
 
-    // Sort locations under their parent site order
     sites.forEach((s) => {
       locationsWithSite
         .filter((l) => l.site_id === s.id)
         .forEach((l) => rows.push({ id: l.id, name: l.name, rowType: "location", parentSiteName: s.name, site_id: l.site_id }));
     });
 
-    // Orphan locations at the end
     locationsWithoutSite.forEach((l) => rows.push({ id: l.id, name: l.name, rowType: "location", parentSiteName: null, site_id: null }));
 
     return (
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between border-b pb-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-primary/10">
-              <MapPin className="h-4 w-4 text-primary" />
-            </div>
-            <div>
-              <CardTitle className="text-base">Sites & Locations</CardTitle>
-              <CardDescription className="text-xs">
-                Manage sites and locations for your company
-              </CardDescription>
+        <CardContent className="pt-4 space-y-4">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-sm font-medium text-muted-foreground">Manage sites and locations</span>
+            <div className="ml-auto flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => openAddDialog("location")}>
+                <Plus className="h-3 w-3 mr-2" />
+                Add Location
+              </Button>
+              <Button size="sm" onClick={() => openAddDialog("site")}>
+                <Plus className="h-3 w-3 mr-2" />
+                Add Site
+              </Button>
             </div>
           </div>
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={() => openAddDialog("location")}>
-              <Plus className="h-3 w-3 mr-2" />
-              Add Location
-            </Button>
-            <Button size="sm" onClick={() => openAddDialog("site")}>
-              <Plus className="h-3 w-3 mr-2" />
-              Add Site
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
           <Table>
             <TableHeader className="bg-muted/50">
               <TableRow>
                 <TableHead className="font-medium text-xs uppercase text-muted-foreground">Name</TableHead>
                 <TableHead className="font-medium text-xs uppercase text-muted-foreground">Type</TableHead>
                 <TableHead className="font-medium text-xs uppercase text-muted-foreground">Parent Site</TableHead>
+                <TableHead className="font-medium text-xs uppercase text-muted-foreground">Assets</TableHead>
                 <TableHead className="font-medium text-xs uppercase text-muted-foreground">Status</TableHead>
                 <TableHead className="font-medium text-xs uppercase text-muted-foreground text-right">Actions</TableHead>
               </TableRow>
@@ -772,7 +1168,7 @@ export default function AdvancedPage() {
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                     No sites or locations found. Add a site or location to get started.
                   </TableCell>
                 </TableRow>
@@ -781,9 +1177,7 @@ export default function AdvancedPage() {
                   <TableRow key={`${row.rowType}-${row.id}`}>
                     <TableCell className="font-medium">{row.name}</TableCell>
                     <TableCell>
-                      <Badge variant={row.rowType === "site" ? "default" : "secondary"}>
-                        {row.rowType === "site" ? "Site" : "Location"}
-                      </Badge>
+                      <span className="text-sm capitalize">{row.rowType}</span>
                     </TableCell>
                     <TableCell>
                       {row.rowType === "location" && row.parentSiteName ? (
@@ -792,6 +1186,7 @@ export default function AdvancedPage() {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{getSetupItemAssetCount(row.rowType, row.id)}</TableCell>
                     <TableCell><StatusDot status="active" label="Active" /></TableCell>
                     <TableCell className="text-right">
                       <Button
@@ -829,7 +1224,6 @@ export default function AdvancedPage() {
     const type = getSetupType();
     const items = getSetupItems();
     const tabConfig = SETUP_TABS.find(t => t.id === setupSubTab);
-    const Icon = tabConfig?.icon || Settings;
 
     if (setupSubTab === "sites") return renderSitesLocationsTable();
     if (setupSubTab === "categories") return renderCategoriesTable();
@@ -837,24 +1231,16 @@ export default function AdvancedPage() {
 
     return (
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between border-b pb-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-primary/10">
-              <Icon className="h-4 w-4 text-primary" />
-            </div>
-            <div>
-              <CardTitle className="text-base">{tabConfig?.label}</CardTitle>
-              <CardDescription className="text-xs">
-                Manage {tabConfig?.label.toLowerCase()} for your company
-              </CardDescription>
+        <CardContent className="pt-4 space-y-4">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-sm font-medium text-muted-foreground">Manage {tabConfig?.label.toLowerCase()}</span>
+            <div className="ml-auto">
+              <Button size="sm" onClick={() => openAddDialog(type)}>
+                <Plus className="h-3 w-3 mr-2" />
+                Add {type.charAt(0).toUpperCase() + type.slice(1)}
+              </Button>
             </div>
           </div>
-          <Button size="sm" onClick={() => openAddDialog(type)}>
-            <Plus className="h-3 w-3 mr-2" />
-            Add {type.charAt(0).toUpperCase() + type.slice(1)}
-          </Button>
-        </CardHeader>
-        <CardContent className="p-0">
           {renderSetupTable(items, type)}
         </CardContent>
       </Card>
@@ -863,98 +1249,62 @@ export default function AdvancedPage() {
 
   return (
     <div className="h-full flex flex-col bg-background">
-      {/* Single Tabs wrapper for both header and content */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
-        {/* Sticky tabs header */}
-        <div className="sticky top-0 z-20 bg-background border-b px-4 pt-3 pb-0">
-          <TabsList className="h-9 bg-muted rounded-lg p-1 w-full justify-start gap-1">
-            <TabsTrigger value="employees" className="gap-1.5 text-xs">
-              <Users className="h-3.5 w-3.5" />
-              Employees
-            </TabsTrigger>
-            <TabsTrigger value="licenses" className="gap-1.5 text-xs">
-              <Key className="h-3.5 w-3.5" />
-              Licenses
-            </TabsTrigger>
-            <TabsTrigger value="vendors" className="gap-1.5 text-xs">
-              <Building2 className="h-3.5 w-3.5" />
-              Vendors
-            </TabsTrigger>
-            <TabsTrigger value="repairs" className="gap-1.5 text-xs">
-              <Wrench className="h-3.5 w-3.5" />
-              Repairs
-            </TabsTrigger>
-            <TabsTrigger value="maintenances" className="gap-1.5 text-xs">
-              <Wrench className="h-3.5 w-3.5" />
-              Maintenances
-            </TabsTrigger>
-            <TabsTrigger value="warranties" className="gap-1.5 text-xs">
-              <Shield className="h-3.5 w-3.5" />
-              Warranties
-            </TabsTrigger>
-            <TabsTrigger value="depreciation" className="gap-1.5 text-xs">
-              <TrendingDown className="h-3.5 w-3.5" />
-              Depreciation
-            </TabsTrigger>
-            <TabsTrigger value="tools" className="gap-1.5 text-xs">
-              <Upload className="h-3.5 w-3.5" />
-              Tools
-            </TabsTrigger>
-            <TabsTrigger value="import-export" className="gap-1.5 text-xs">
-              <FileDown className="h-3.5 w-3.5" />
-              Import/Export
-            </TabsTrigger>
-            <TabsTrigger value="purchase-orders" className="gap-1.5 text-xs">
-              <ShoppingCart className="h-3.5 w-3.5" />
-              Purchase Orders
-            </TabsTrigger>
-            <TabsTrigger value="reports" className="gap-1.5 text-xs">
-              <FileBarChart className="h-3.5 w-3.5" />
-              Reports
-            </TabsTrigger>
-            <TabsTrigger value="logs" className="gap-1.5 text-xs">
-              <ScrollText className="h-3.5 w-3.5" />
-              Logs
-            </TabsTrigger>
-            <TabsTrigger value="audit" className="gap-1.5 text-xs">
-              <ClipboardCheck className="h-3.5 w-3.5" />
-              Audit
-            </TabsTrigger>
-            <TabsTrigger value="setup" className="gap-1.5 text-xs">
-              <Settings className="h-3.5 w-3.5" />
-              Setup
-            </TabsTrigger>
-          </TabsList>
-
-          {/* Secondary Navigation for Setup Tab */}
-          {activeTab === "setup" && (
-            <div className="flex flex-wrap gap-1 pt-3 pb-3">
-              {SETUP_TABS.map((tab) => {
-                const Icon = tab.icon;
-                const isActive = setupSubTab === tab.id;
-                return (
-                  <Button
-                    key={tab.id}
-                    variant={isActive ? "default" : "ghost"}
-                    size="sm"
-                    onClick={() => setSetupSubTab(tab.id)}
-                    className={`gap-1.5 h-7 text-xs ${isActive ? "" : "text-muted-foreground"}`}
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                    {tab.label}
-                  </Button>
-                );
-              })}
-            </div>
-          )}
+        {/* Sticky tabs with scroll fade indicator */}
+        <div className="sticky top-0 z-30 bg-background border-b px-4 py-2">
+          <div className="relative">
+            <TabsList className="h-9 bg-muted rounded-lg p-1 w-full justify-start gap-1 overflow-x-auto overflow-y-hidden scrollbar-none">
+              <TabsTrigger value="employees" className="text-xs">Employees</TabsTrigger>
+              <TabsTrigger value="vendors" className="text-xs">Vendors</TabsTrigger>
+              <TabsTrigger value="licenses" className="text-xs">Licenses</TabsTrigger>
+              <TabsTrigger value="repairs" className="text-xs">Repairs</TabsTrigger>
+              <TabsTrigger value="warranties" className="text-xs">Warranties</TabsTrigger>
+              <TabsTrigger value="depreciation" className="text-xs">Depreciation</TabsTrigger>
+              <TabsTrigger value="documents" className="text-xs">Documents</TabsTrigger>
+              <TabsTrigger value="import-export" className="text-xs">Import/Export</TabsTrigger>
+              <TabsTrigger value="reports" className="text-xs">Reports</TabsTrigger>
+              <TabsTrigger value="setup" className="text-xs">Setup</TabsTrigger>
+            </TabsList>
+            {/* Fade gradient for scroll indicator */}
+            <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-background to-transparent lg:hidden" />
+          </div>
         </div>
+
+        {/* Secondary Navigation for Setup Tab */}
+        {activeTab === "setup" && (
+          <div className="border-b px-4 py-2 flex flex-wrap gap-1.5 bg-background">
+            {SETUP_TABS.map((tab) => {
+              const isActive = setupSubTab === tab.id;
+              const countMap: Record<string, number> = {
+                sites: sites.length,
+                categories: categories.length,
+                departments: departments.length,
+                makes: makes.length,
+              };
+              const count = countMap[tab.id];
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setSetupSubTab(tab.id)}
+                  className={`h-7 px-3 rounded-md text-xs font-medium transition-colors ${
+                    isActive
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80"
+                  }`}
+                >
+                  {tab.label}{count !== undefined ? ` (${count})` : ""}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Scrollable content */}
         <div className="flex-1 overflow-auto p-4">
           {/* Employees Tab */}
           <TabsContent value="employees" className="mt-0 space-y-4">
-            {/* Stat Cards - 5 cards, all clickable */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            {/* Stat Cards — normalized grid */}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
               <StatCard icon={Users} value={employees.length} label="Total Employees" colorClass="bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" onClick={() => { setEmployeeStatusFilter("all"); setEmployeeRoleFilter("all"); }} active={employeeStatusFilter === "all" && employeeRoleFilter === "all"} />
               <StatCard icon={CheckCircle} value={employees.filter(e => e.status === "active").length} label="Active" colorClass="bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" onClick={() => { setEmployeeStatusFilter("active"); setEmployeeRoleFilter("all"); }} active={employeeStatusFilter === "active"} />
               <StatCard icon={UserX} value={employees.filter(e => e.status !== "active").length} label="Inactive" colorClass="bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" onClick={() => { setEmployeeStatusFilter("inactive"); setEmployeeRoleFilter("all"); }} active={employeeStatusFilter === "inactive"} />
@@ -965,12 +1315,12 @@ export default function AdvancedPage() {
             <Card>
               <CardContent className="pt-4 space-y-4">
                 <div className="flex items-center gap-3 flex-wrap">
-                  <div className="relative max-w-xs flex-1 min-w-[200px]">
+                  <div className="relative max-w-sm flex-1 min-w-[200px]">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input placeholder="Search employees..." value={employeeSearch} onChange={(e) => setEmployeeSearch(e.target.value)} className="pl-9" />
+                    <Input placeholder="Search employees..." value={employeeSearch} onChange={(e) => setEmployeeSearch(e.target.value)} className="pl-9 h-8" />
                   </div>
                   <Select value={employeeRoleFilter} onValueChange={setEmployeeRoleFilter}>
-                    <SelectTrigger className="w-[130px] h-9">
+                    <SelectTrigger className="w-[140px] h-8">
                       <SelectValue placeholder="All Roles" />
                     </SelectTrigger>
                     <SelectContent>
@@ -982,7 +1332,7 @@ export default function AdvancedPage() {
                     </SelectContent>
                   </Select>
                   <Select value={employeeStatusFilter} onValueChange={setEmployeeStatusFilter}>
-                    <SelectTrigger className="w-[130px] h-9">
+                    <SelectTrigger className="w-[140px] h-8">
                       <SelectValue placeholder="All Status" />
                     </SelectTrigger>
                     <SelectContent>
@@ -991,19 +1341,29 @@ export default function AdvancedPage() {
                       <SelectItem value="inactive">Inactive</SelectItem>
                     </SelectContent>
                   </Select>
-                  <div className="ml-auto">
-                    <Button size="sm" variant="outline" onClick={() => navigate("/settings?section=users")}>
+                  <div className="ml-auto flex gap-2">
+                    <Button size="sm" variant="outline" onClick={() => exportCSV(filteredEmployees.map(e => ({
+                      Name: e.name || "",
+                      Email: e.email || "",
+                      Role: e.role || "user",
+                      Status: e.status || "",
+                      "Assets Assigned": getEmployeeAssetCount(e),
+                    })), "employees")}>
+                      <FileDown className="h-4 w-4 mr-1" />
+                      Export
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => navigate("/admin/users")}>
                       <Users className="h-4 w-4 mr-2" />
                       Manage Users
                     </Button>
                   </div>
                 </div>
 
-                <div className="rounded-md border">
                   <Table>
                     <TableHeader className="bg-muted/50">
                       <TableRow>
                         <SortableTableHeader column="name" label="Name" sortConfig={employeeSort} onSort={handleEmployeeSort} />
+                        <SortableTableHeader column="email" label="Email" sortConfig={employeeSort} onSort={handleEmployeeSort} />
                         <SortableTableHeader column="role" label="Role" sortConfig={employeeSort} onSort={handleEmployeeSort} />
                         <SortableTableHeader column="status" label="Status" sortConfig={employeeSort} onSort={handleEmployeeSort} />
                         <SortableTableHeader column="assets" label="Assets" sortConfig={employeeSort} onSort={handleEmployeeSort} />
@@ -1013,18 +1373,18 @@ export default function AdvancedPage() {
                     <TableBody>
                       {loadingEmployees ? (
                         <TableRow>
-                          <TableCell colSpan={5} className="text-center py-12">
-                            <div className="text-center space-y-2">
-                              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                          <TableCell colSpan={6} className="text-center py-12">
+                            <div className="flex flex-col items-center justify-center">
+                              <Loader2 className="h-6 w-6 text-muted-foreground animate-spin mb-2" />
                               <p className="text-sm text-muted-foreground">Loading employees...</p>
                             </div>
                           </TableCell>
                         </TableRow>
                       ) : paginatedEmployees.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={5} className="text-center py-12">
+                          <TableCell colSpan={6} className="text-center py-12">
                             <div className="flex flex-col items-center justify-center">
-                              <Users className="h-12 w-12 text-muted-foreground mb-3 opacity-50" />
+                              <Users className="h-8 w-8 text-muted-foreground mb-2 opacity-50" />
                               <p className="text-sm text-muted-foreground">No employees found</p>
                             </div>
                           </TableCell>
@@ -1036,7 +1396,7 @@ export default function AdvancedPage() {
                             ? employee.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
                             : employee.email[0].toUpperCase();
                           return (
-                            <TableRow key={employee.id} className="hover:bg-muted/50 cursor-pointer" onClick={() => handleViewEmployeeAssets(employee)}>
+                            <TableRow key={employee.id} className="hover:bg-muted/50 cursor-pointer transition-colors" onClick={() => handleViewEmployeeAssets(employee)}>
                               <TableCell className="font-medium">
                                 <div className="flex items-center gap-2">
                                   <Avatar className="h-7 w-7">
@@ -1045,6 +1405,7 @@ export default function AdvancedPage() {
                                   {employee.name || "—"}
                                 </div>
                               </TableCell>
+                              <TableCell className="text-sm text-muted-foreground">{employee.email || "—"}</TableCell>
                               <TableCell className="text-sm capitalize">{employee.role || "user"}</TableCell>
                               <TableCell>
                                 <StatusDot status={employee.status === "active" ? "active" : "inactive"} label={employee.status === "active" ? "Active" : "Inactive"} />
@@ -1072,7 +1433,7 @@ export default function AdvancedPage() {
                                       Assign Asset
                                     </DropdownMenuItem>
                                     <DropdownMenuSeparator />
-                                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); navigate("/settings?section=users"); }}>
+                                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); navigate(`/admin/users?edit=${employee.id}`); }}>
                                       <Users className="h-4 w-4 mr-2" />
                                       View Profile
                                     </DropdownMenuItem>
@@ -1089,9 +1450,7 @@ export default function AdvancedPage() {
                       )}
                     </TableBody>
                   </Table>
-                </div>
                 
-                {/* Pagination with info text */}
                 {employeeTotalPages > 1 && (
                   <div className="flex items-center justify-between pt-1 px-1">
                     <p className="text-xs text-muted-foreground">
@@ -1114,56 +1473,71 @@ export default function AdvancedPage() {
 
           {/* Vendors Tab */}
           <TabsContent value="vendors" className="mt-0 space-y-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <StatCard icon={Building2} value={vendors.length} label="Total Vendors" colorClass="bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" />
+              <StatCard icon={Mail} value={vendors.filter(v => v.contact_email).length} label="With Contact" colorClass="bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" />
+              <StatCard icon={Globe} value={vendors.filter(v => v.website).length} label="With Website" colorClass="bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400" />
+            </div>
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between border-b pb-4">
-                <div>
-                  <CardTitle className="text-base">Vendors</CardTitle>
-                  <CardDescription className="text-xs">{filteredVendors.length} vendor records</CardDescription>
-                </div>
-                <Button size="sm" onClick={() => navigate("/assets/vendors/add-vendor")}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Vendor
-                </Button>
-              </CardHeader>
               <CardContent className="pt-4 space-y-4">
-                <div className="relative max-w-md">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input placeholder="Search vendors..." value={vendorSearch} onChange={(e) => setVendorSearch(e.target.value)} className="pl-9" />
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="relative max-w-sm flex-1 min-w-[200px]">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input placeholder="Search vendors..." value={vendorSearch} onChange={(e) => setVendorSearch(e.target.value)} className="pl-9 h-8" />
+                  </div>
+                  <div className="ml-auto flex gap-2">
+                    <Button size="sm" variant="outline" onClick={() => exportCSV(filteredVendors.map(v => ({ 
+                      Name: v.name, 
+                      Contact: v.contact_name || "", 
+                      Email: v.contact_email || "", 
+                      Phone: v.contact_phone || "", 
+                      Website: v.website || "",
+                      "Asset Count": vendorAssetCounts[v.id] || 0,
+                    })), "vendors")}>
+                      <FileDown className="h-4 w-4 mr-1" />
+                      Export
+                    </Button>
+                    <Button size="sm" onClick={() => navigate("/assets/vendors/add-vendor")}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Vendor
+                    </Button>
+                  </div>
                 </div>
 
-                <div className="rounded-md border">
                   <Table>
                     <TableHeader className="bg-muted/50">
                       <TableRow>
-                        <TableHead className="font-medium text-xs uppercase text-muted-foreground">Vendor Name</TableHead>
-                        <TableHead className="font-medium text-xs uppercase text-muted-foreground">Contact Person</TableHead>
-                        <TableHead className="font-medium text-xs uppercase text-muted-foreground">Email</TableHead>
+                        <SortableTableHeader column="name" label="Vendor Name" sortConfig={vendorSort} onSort={handleVendorSort} />
+                        <SortableTableHeader column="contact_name" label="Contact Person" sortConfig={vendorSort} onSort={handleVendorSort} />
+                        <SortableTableHeader column="contact_email" label="Email" sortConfig={vendorSort} onSort={handleVendorSort} />
                         <TableHead className="font-medium text-xs uppercase text-muted-foreground">Phone</TableHead>
                         <TableHead className="font-medium text-xs uppercase text-muted-foreground">Website</TableHead>
+                        <TableHead className="font-medium text-xs uppercase text-muted-foreground">Assets</TableHead>
+                        <TableHead className="font-medium text-xs uppercase text-muted-foreground w-[80px]">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {loadingVendors ? (
                         <TableRow>
-                          <TableCell colSpan={5} className="text-center py-12">
-                            <div className="text-center space-y-2">
-                              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                          <TableCell colSpan={7} className="text-center py-12">
+                            <div className="flex flex-col items-center justify-center">
+                              <Loader2 className="h-6 w-6 text-muted-foreground animate-spin mb-2" />
                               <p className="text-sm text-muted-foreground">Loading vendors...</p>
                             </div>
                           </TableCell>
                         </TableRow>
                       ) : paginatedVendors.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={5} className="text-center py-12">
+                          <TableCell colSpan={7} className="text-center py-12">
                             <div className="flex flex-col items-center justify-center">
-                              <Building2 className="h-12 w-12 text-muted-foreground mb-3 opacity-50" />
+                              <Building2 className="h-8 w-8 text-muted-foreground mb-2 opacity-50" />
                               <p className="text-sm text-muted-foreground">No vendors found</p>
                             </div>
                           </TableCell>
                         </TableRow>
                       ) : (
                         paginatedVendors.map((vendor) => (
-                          <TableRow key={vendor.id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/assets/vendors/detail/${vendor.id}`)}>
+                          <TableRow key={vendor.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => navigate(`/assets/vendors/detail/${vendor.id}`)}>
                             <TableCell className="font-medium">
                               <div className="flex items-center gap-2">
                                 <Building2 className="h-4 w-4 text-muted-foreground" />
@@ -1195,86 +1569,135 @@ export default function AdvancedPage() {
                                 </a>
                               ) : "—"}
                             </TableCell>
+                            <TableCell className="text-sm font-medium">
+                              <div className="flex items-center gap-1.5">
+                                <Package className="h-3.5 w-3.5 text-muted-foreground" />
+                                {vendorAssetCounts[vendor.id] || 0}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                                  <Button variant="ghost" size="icon" className="h-7 w-7">
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-48">
+                                  <DropdownMenuItem onClick={(e) => { e.stopPropagation(); navigate(`/assets/vendors/detail/${vendor.id}`); }}>
+                                    <Eye className="h-4 w-4 mr-2" />
+                                    View Details
+                                  </DropdownMenuItem>
+                                  {vendor.contact_email && (
+                                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); window.open(`mailto:${vendor.contact_email}`, '_blank'); }}>
+                                      <Send className="h-4 w-4 mr-2" />
+                                      Email Vendor
+                                    </DropdownMenuItem>
+                                  )}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </TableCell>
                           </TableRow>
                         ))
                       )}
                     </TableBody>
                   </Table>
-                </div>
-                <Pagination currentPage={vendorPage} totalPages={vendorTotalPages} onPageChange={setVendorPage} />
+                <PaginationControls currentPage={vendorPage} totalPages={vendorTotalPages} totalItems={filteredVendors.length} itemsPerPage={ITEMS_PER_PAGE} onPageChange={setVendorPage} />
               </CardContent>
             </Card>
           </TabsContent>
 
-          {/* Maintenances Tab */}
-          <TabsContent value="maintenances" className="mt-0 space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Licenses Tab */}
+          <TabsContent value="licenses" className="mt-0">
+            <LicensesContent />
+          </TabsContent>
+
+          {/* Repairs Tab — with sortable headers (Phase 3: F4) */}
+          <TabsContent value="repairs" className="mt-0 space-y-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <StatCard icon={Wrench} value={maintenancePending} label="Pending" colorClass="bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400" />
               <StatCard icon={Wrench} value={maintenanceInProgress} label="In Progress" colorClass="bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" />
               <StatCard icon={CheckCircle} value={maintenanceCompleted} label="Completed" colorClass="bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" />
             </div>
 
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between border-b pb-4">
-                <div>
-                  <CardTitle className="text-base">All Maintenance Records</CardTitle>
-                  <CardDescription className="text-xs">{filteredMaintenances.length} records</CardDescription>
-                </div>
-                <Button size="sm" onClick={() => navigate("/assets/repairs/create")}>
-                  <Plus className="h-4 w-4 mr-1" />
-                  New Maintenance
-                </Button>
-              </CardHeader>
               <CardContent className="pt-4 space-y-4">
-                <div className="flex items-center gap-4 flex-wrap">
-                  <div className="relative flex-1 max-w-sm">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="relative flex-1 max-w-sm min-w-[200px]">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input placeholder="Search maintenance records..." value={maintenanceSearch} onChange={(e) => setMaintenanceSearch(e.target.value)} className="pl-9" />
+                    <Input placeholder="Search repairs..." value={maintenanceSearch} onChange={(e) => setMaintenanceSearch(e.target.value)} className="pl-9 h-8" />
                   </div>
                   <Select value={maintenanceStatusFilter} onValueChange={setMaintenanceStatusFilter}>
-                    <SelectTrigger className="w-[150px]">
+                    <SelectTrigger className="w-[140px] h-8">
                       <SelectValue placeholder="Status" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Status</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="open">Open</SelectItem>
                       <SelectItem value="in_progress">In Progress</SelectItem>
                       <SelectItem value="completed">Completed</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
                     </SelectContent>
                   </Select>
+                  <div className="ml-auto flex gap-2">
+                    <Button size="sm" variant="outline" onClick={() => exportCSV(filteredMaintenances.map(m => ({
+                      "Repair #": m.repair_number || "",
+                      Asset: m.asset?.name || "",
+                      "Asset Tag": m.asset?.asset_tag || "",
+                      Issue: m.issue_description || "",
+                      Status: m.status || "",
+                      Created: m.created_at ? format(new Date(m.created_at), "yyyy-MM-dd") : "",
+                      "Days Open": m.status !== "completed" && m.status !== "cancelled" && m.created_at
+                        ? differenceInDays(new Date(), new Date(m.created_at))
+                        : "",
+                    })), "repairs")}>
+                      <FileDown className="h-4 w-4 mr-1" />
+                      Export
+                    </Button>
+                    <Button size="sm" onClick={() => navigate("/assets/repairs/create")}>
+                      <Plus className="h-4 w-4 mr-1" />
+                      New Record
+                    </Button>
+                  </div>
                 </div>
 
-                <div className="border rounded-lg">
                   <Table>
                     <TableHeader className="bg-muted/50">
                       <TableRow>
-                        <TableHead className="font-medium text-xs uppercase text-muted-foreground">Repair #</TableHead>
-                        <TableHead className="font-medium text-xs uppercase text-muted-foreground">Asset</TableHead>
+                        <SortableTableHeader column="repair_number" label="Repair #" sortConfig={repairSort} onSort={handleRepairSort} />
+                        <SortableTableHeader column="asset" label="Asset" sortConfig={repairSort} onSort={handleRepairSort} />
                         <TableHead className="font-medium text-xs uppercase text-muted-foreground">Issue</TableHead>
-                        <TableHead className="font-medium text-xs uppercase text-muted-foreground">Status</TableHead>
-                        <TableHead className="font-medium text-xs uppercase text-muted-foreground">Created</TableHead>
+                        <SortableTableHeader column="status" label="Status" sortConfig={repairSort} onSort={handleRepairSort} />
+                        <SortableTableHeader column="created_at" label="Created" sortConfig={repairSort} onSort={handleRepairSort} />
+                        <SortableTableHeader column="days_open" label="Days Open" sortConfig={repairSort} onSort={handleRepairSort} />
                         <TableHead className="font-medium text-xs uppercase text-muted-foreground w-[80px]">Action</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {loadingMaintenances ? (
                         <TableRow>
-                          <TableCell colSpan={6} className="text-center py-12">
-                            <div className="text-center space-y-2">
-                              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
-                              <p className="text-sm text-muted-foreground">Loading maintenance records...</p>
+                          <TableCell colSpan={7} className="text-center py-12">
+                            <div className="flex flex-col items-center justify-center">
+                              <Loader2 className="h-6 w-6 text-muted-foreground animate-spin mb-2" />
+                              <p className="text-sm text-muted-foreground">Loading records...</p>
                             </div>
                           </TableCell>
                         </TableRow>
-                      ) : filteredMaintenances.length === 0 ? (
+                      ) : paginatedMaintenances.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                            No maintenance records found
+                          <TableCell colSpan={7} className="text-center py-12">
+                            <div className="flex flex-col items-center justify-center">
+                              <Wrench className="h-8 w-8 text-muted-foreground mb-2 opacity-50" />
+                              <p className="text-sm text-muted-foreground">No repair records found</p>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ) : (
-                        filteredMaintenances.map((maintenance) => (
-                          <TableRow key={maintenance.id}>
+                        paginatedMaintenances.map((maintenance) => {
+                          const daysOpen = maintenance.status !== "completed" && maintenance.status !== "cancelled" && maintenance.created_at
+                            ? differenceInDays(new Date(), new Date(maintenance.created_at))
+                            : null;
+                          return (
+                          <TableRow key={maintenance.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => navigate(`/assets/repairs/detail/${maintenance.id}`)}>
                             <TableCell className="font-medium">{maintenance.repair_number}</TableCell>
                             <TableCell>
                               <div>
@@ -1287,44 +1710,46 @@ export default function AdvancedPage() {
                             <TableCell className="text-sm text-muted-foreground">
                               {maintenance.created_at ? format(new Date(maintenance.created_at), 'MMM d, yyyy') : '-'}
                             </TableCell>
+                            <TableCell className="text-sm">
+                              {daysOpen !== null ? (
+                                <span className={daysOpen > 14 ? "text-destructive font-medium" : daysOpen > 7 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}>
+                                  {daysOpen}d
+                                </span>
+                              ) : "—"}
+                            </TableCell>
                             <TableCell>
-                              <Button variant="ghost" size="sm" onClick={() => navigate(`/assets/repairs/detail/${maintenance.id}`)}>
-                                <ExternalLink className="h-4 w-4" />
+                              <Button variant="ghost" size="sm" className="h-7" onClick={(e) => { e.stopPropagation(); navigate(`/assets/repairs/detail/${maintenance.id}`); }}>
+                                <ExternalLink className="h-3.5 w-3.5" />
                               </Button>
                             </TableCell>
                           </TableRow>
-                        ))
+                          );
+                        })
                       )}
                     </TableBody>
                   </Table>
-                </div>
+                <PaginationControls currentPage={maintenancePage} totalPages={maintenanceTotalPages} totalItems={filteredMaintenances.length} itemsPerPage={ITEMS_PER_PAGE} onPageChange={setMaintenancePage} />
               </CardContent>
             </Card>
           </TabsContent>
 
-          {/* Warranties Tab */}
+          {/* Warranties Tab — with sortable headers and dark mode row highlighting (Phase 1: B3, Phase 3: F4) */}
           <TabsContent value="warranties" className="mt-0 space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <StatCard icon={CheckCircle} value={warrantyActive} label="Active" colorClass="bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" />
               <StatCard icon={Shield} value={warrantyExpiring} label="Expiring Soon" colorClass="bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400" />
               <StatCard icon={Shield} value={warrantyExpired} label="Expired" colorClass="bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" />
             </div>
 
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between border-b pb-4">
-                <div>
-                  <CardTitle className="text-base">Asset Warranties</CardTitle>
-                  <CardDescription className="text-xs">{filteredWarranties.length} warranty records</CardDescription>
-                </div>
-              </CardHeader>
               <CardContent className="pt-4 space-y-4">
-                <div className="flex items-center gap-4 flex-wrap">
-                  <div className="relative flex-1 max-w-sm">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="relative flex-1 max-w-sm min-w-[200px]">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input placeholder="Search warranties..." value={warrantySearch} onChange={(e) => setWarrantySearch(e.target.value)} className="pl-9" />
+                    <Input placeholder="Search warranties..." value={warrantySearch} onChange={(e) => setWarrantySearch(e.target.value)} className="pl-9 h-8" />
                   </div>
                   <Select value={warrantyStatusFilter} onValueChange={setWarrantyStatusFilter}>
-                    <SelectTrigger className="w-[150px]">
+                    <SelectTrigger className="w-[140px] h-8">
                       <SelectValue placeholder="Status" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1334,48 +1759,72 @@ export default function AdvancedPage() {
                       <SelectItem value="expired">Expired</SelectItem>
                     </SelectContent>
                   </Select>
+                  <div className="ml-auto">
+                    <Button size="sm" variant="outline" onClick={() => exportCSV(filteredWarranties.map(a => ({
+                      Asset: a.name, Tag: a.asset_tag || "", Category: (a as any).category?.name || "",
+                      Make: (a as any).make?.name || "", Model: a.model || "",
+                      "Expiry Date": a.warranty_expiry ? format(new Date(a.warranty_expiry), "yyyy-MM-dd") : "",
+                      Status: getWarrantyStatus(a.warranty_expiry).label
+                    })), "warranties")}>
+                      <FileDown className="h-4 w-4 mr-1" />
+                      Export
+                    </Button>
+                  </div>
                 </div>
 
-                <div className="border rounded-lg">
                   <Table>
                     <TableHeader className="bg-muted/50">
                       <TableRow>
-                        <TableHead className="font-medium text-xs uppercase text-muted-foreground">Asset</TableHead>
-                        <TableHead className="font-medium text-xs uppercase text-muted-foreground">Category</TableHead>
-                        <TableHead className="font-medium text-xs uppercase text-muted-foreground">Expiry Date</TableHead>
+                        <SortableTableHeader column="name" label="Asset" sortConfig={warrantySort} onSort={handleWarrantySort} />
+                        <TableHead className="font-medium text-xs uppercase text-muted-foreground">Make / Model</TableHead>
+                        <SortableTableHeader column="category" label="Category" sortConfig={warrantySort} onSort={handleWarrantySort} />
+                        <SortableTableHeader column="warranty_expiry" label="Expiry Date" sortConfig={warrantySort} onSort={handleWarrantySort} />
                         <TableHead className="font-medium text-xs uppercase text-muted-foreground">Status</TableHead>
-                        <TableHead className="font-medium text-xs uppercase text-muted-foreground">Days</TableHead>
+                        <SortableTableHeader column="days" label="Days" sortConfig={warrantySort} onSort={handleWarrantySort} />
                         <TableHead className="font-medium text-xs uppercase text-muted-foreground w-[80px]">Action</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {loadingWarranties ? (
                         <TableRow>
-                          <TableCell colSpan={6} className="text-center py-12">
-                            <div className="text-center space-y-2">
-                              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                          <TableCell colSpan={7} className="text-center py-12">
+                            <div className="flex flex-col items-center justify-center">
+                              <Loader2 className="h-6 w-6 text-muted-foreground animate-spin mb-2" />
                               <p className="text-sm text-muted-foreground">Loading warranty records...</p>
                             </div>
                           </TableCell>
                         </TableRow>
-                      ) : filteredWarranties.length === 0 ? (
+                      ) : paginatedWarranties.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                            No warranty records found
+                          <TableCell colSpan={7} className="text-center py-12">
+                            <div className="flex flex-col items-center justify-center">
+                              <Shield className="h-8 w-8 text-muted-foreground mb-2 opacity-50" />
+                              <p className="text-sm text-muted-foreground">No warranty records found</p>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ) : (
-                        filteredWarranties.map((asset) => {
+                        paginatedWarranties.map((asset) => {
                           const warrantyInfo = getWarrantyStatus(asset.warranty_expiry);
+                          // Dark mode compatible row highlighting (Phase 1: B3)
+                          const rowClass = warrantyInfo.status === "expired"
+                            ? "bg-destructive/5 hover:bg-destructive/10 dark:bg-destructive/10 dark:hover:bg-destructive/15"
+                            : warrantyInfo.status === "expiring"
+                            ? "bg-amber-100/30 hover:bg-amber-100/50 dark:bg-amber-900/10 dark:hover:bg-amber-900/20"
+                            : "";
                           return (
-                            <TableRow key={asset.id}>
+                            <TableRow key={asset.id} className={`${rowClass} cursor-pointer transition-colors`} onClick={() => navigate(`/assets/detail/${asset.id}`)}>
                               <TableCell className="font-medium">
                                 <div>
                                   <p className="text-sm">{asset.name}</p>
                                   <p className="text-xs text-muted-foreground">{asset.asset_tag}</p>
                                 </div>
                               </TableCell>
-                              <TableCell>{asset.category?.name || '-'}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">
+                                {(asset as any).make?.name || "—"}
+                                {asset.model ? ` • ${asset.model}` : ""}
+                              </TableCell>
+                              <TableCell>{(asset as any).category?.name || '—'}</TableCell>
                               <TableCell>{format(new Date(asset.warranty_expiry), 'MMM dd, yyyy')}</TableCell>
                               <TableCell>
                                 <StatusDot status={warrantyInfo.status as any} label={warrantyInfo.label} />
@@ -1384,8 +1833,8 @@ export default function AdvancedPage() {
                                 {warrantyInfo.status === "expired" ? `${warrantyInfo.days} days ago` : `${warrantyInfo.days} days left`}
                               </TableCell>
                               <TableCell>
-                                <Button variant="ghost" size="sm" onClick={() => navigate(`/assets/detail/${asset.id}`)}>
-                                  <ExternalLink className="h-4 w-4" />
+                                <Button variant="ghost" size="sm" className="h-7" onClick={() => navigate(`/assets/detail/${asset.id}`)}>
+                                  <ExternalLink className="h-3.5 w-3.5" />
                                 </Button>
                               </TableCell>
                             </TableRow>
@@ -1394,79 +1843,9 @@ export default function AdvancedPage() {
                       )}
                     </TableBody>
                   </Table>
-                </div>
+                <PaginationControls currentPage={warrantyPage} totalPages={warrantyTotalPages} totalItems={filteredWarranties.length} itemsPerPage={ITEMS_PER_PAGE} onPageChange={setWarrantyPage} />
               </CardContent>
             </Card>
-          </TabsContent>
-
-          {/* Tools Tab */}
-          <TabsContent value="tools" className="mt-0 space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              <Card className="border hover:border-primary/50 transition-all hover:shadow-md cursor-pointer" onClick={() => navigate("/assets/import-export")}>
-                <CardHeader className="pb-3">
-                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-2">
-                    <Upload className="h-5 w-5 text-primary" />
-                  </div>
-                  <CardTitle className="text-sm font-semibold">Import / Export</CardTitle>
-                  <CardDescription className="text-xs">Bulk import/export assets with proper field mapping</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Button variant="outline" className="w-full h-8 text-xs">Open Wizard</Button>
-                </CardContent>
-              </Card>
-
-              <PhotoGalleryDialog />
-              <DocumentsGalleryDialog />
-
-              <Card className="border hover:border-primary/50 transition-all hover:shadow-md cursor-pointer" onClick={() => navigate("/assets/depreciation")}>
-                <CardHeader className="pb-3">
-                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-2">
-                    <TrendingUp className="h-5 w-5 text-primary" />
-                  </div>
-                  <CardTitle className="text-sm font-semibold">Depreciation</CardTitle>
-                  <CardDescription className="text-xs">Track asset lifecycle</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Button variant="outline" className="w-full h-8 text-xs">Manage Lifecycle</Button>
-                </CardContent>
-              </Card>
-
-              <Card className="border hover:border-primary/50 transition-all hover:shadow-md cursor-pointer" onClick={() => navigate("/assets/repairs")}>
-                <CardHeader className="pb-3">
-                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-2">
-                    <Wrench className="h-5 w-5 text-primary" />
-                  </div>
-                  <CardTitle className="text-sm font-semibold">Repairs</CardTitle>
-                  <CardDescription className="text-xs">Track asset repairs</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Button variant="outline" className="w-full h-8 text-xs">View Repairs</Button>
-                </CardContent>
-              </Card>
-
-              <Card className="border hover:border-primary/50 transition-all hover:shadow-md cursor-pointer" onClick={() => navigate("/assets/logs")}>
-                <CardHeader className="pb-3">
-                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-2">
-                    <ClipboardCheck className="h-5 w-5 text-primary" />
-                  </div>
-                  <CardTitle className="text-sm font-semibold">Audit</CardTitle>
-                  <CardDescription className="text-xs">View asset change history</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Button variant="outline" className="w-full h-8 text-xs">View Audit Trail</Button>
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-
-          {/* Licenses Tab */}
-          <TabsContent value="licenses" className="mt-0">
-            <LicensesContent />
-          </TabsContent>
-
-          {/* Repairs Tab */}
-          <TabsContent value="repairs" className="mt-0">
-            <RepairsContent />
           </TabsContent>
 
           {/* Depreciation Tab */}
@@ -1474,29 +1853,21 @@ export default function AdvancedPage() {
             <DepreciationContent />
           </TabsContent>
 
+          {/* Documents Tab — inline content (Phase 2: B2) */}
+          <TabsContent value="documents" className="mt-0 space-y-4">
+            <DocumentsStats />
+            <InlinePhotoGallery />
+            <InlineDocumentsList />
+          </TabsContent>
+
           {/* Import/Export Tab */}
           <TabsContent value="import-export" className="mt-0">
             <ImportExportContent />
           </TabsContent>
 
-          {/* Purchase Orders Tab */}
-          <TabsContent value="purchase-orders" className="mt-0">
-            <PurchaseOrdersContent />
-          </TabsContent>
-
           {/* Reports Tab */}
           <TabsContent value="reports" className="mt-0">
             <AssetReports />
-          </TabsContent>
-
-          {/* Logs Tab */}
-          <TabsContent value="logs" className="mt-0">
-            <AssetLogsContent />
-          </TabsContent>
-
-          {/* Audit Tab */}
-          <TabsContent value="audit" className="mt-0">
-            <AssetAuditContent />
           </TabsContent>
 
           {/* Setup Tab */}

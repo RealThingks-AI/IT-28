@@ -29,18 +29,7 @@ const AddVendor = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("tenant_id")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      const tenantId = profileData?.tenant_id || 1;
-
-      const { error } = await supabase.from("itam_vendors").insert({
-        ...data,
-        tenant_id: tenantId,
-      });
+      const { error } = await supabase.from("itam_vendors").insert(data);
 
       if (error) throw error;
     },

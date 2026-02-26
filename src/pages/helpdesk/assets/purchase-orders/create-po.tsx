@@ -51,14 +51,6 @@ const CreatePO = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("tenant_id")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      const tenantId = profileData?.tenant_id || 1;
-
       // Generate PO number
       const { data: lastPO } = await supabase
         .from("itam_purchase_orders")
@@ -76,7 +68,6 @@ const CreatePO = () => {
       const { error } = await supabase.from("itam_purchase_orders").insert({
         ...data,
         po_number: poNumber,
-        tenant_id: tenantId,
         created_by: user.id,
         status: "draft",
       });

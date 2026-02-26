@@ -7,7 +7,6 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -23,7 +22,6 @@ serve(async (req) => {
       }
     );
 
-    // Get the authenticated user
     const {
       data: { user },
       error: userError,
@@ -36,36 +34,17 @@ serve(async (req) => {
       );
     }
 
-    // Get user's organization
-    const { data: userData, error: userDataError } = await supabaseClient
-      .from('users')
-      .select('organisation_id')
-      .eq('auth_user_id', user.id)
-      .single();
-
-    if (userDataError || !userData?.organisation_id) {
-      return new Response(
-        JSON.stringify({ error: 'Organization not found' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const organisationId = userData.organisation_id;
-
-    // Get tag format configuration
+    // Get tag format configuration (single-company, no org scoping needed)
     const { data: tagFormat, error: tagError } = await supabaseClient
       .from('itam_tag_format')
       .select('prefix, start_number, padding_length')
-      .eq('organisation_id', organisationId)
       .single();
 
     if (tagError) {
       console.error('Error fetching tag format:', tagError);
     }
 
-    // Use defaults if no tag format is configured
     const prefix = tagFormat?.prefix || 'AS-';
-    // Prefer start_number length, then padding_length, then default
     const paddingLength = (tagFormat?.start_number?.length ?? 0) || tagFormat?.padding_length || 4;
 
     const startNumberRaw = tagFormat?.start_number || '1';
@@ -74,7 +53,7 @@ serve(async (req) => {
  
     // Call the database function to get the next number
     const { data: nextNumberData, error: nextNumberError } = await supabaseClient
-      .rpc('get_next_asset_number', { p_organisation_id: organisationId });
+      .rpc('get_next_asset_number', {});
  
     if (nextNumberError) {
       console.error('Error getting next asset number:', nextNumberError);

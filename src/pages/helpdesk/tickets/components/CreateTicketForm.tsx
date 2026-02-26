@@ -67,15 +67,8 @@ export function CreateTicketForm({ onSearchChange }: CreateTicketFormProps) {
 
       if (!userData) throw new Error("User profile not found");
 
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("tenant_id")
-        .eq("id", user.id)
-        .maybeSingle();
-
       return {
         id: userData.id,
-        tenant_id: profileData?.tenant_id || 1,
         authUserId: user.id,
       };
     },
@@ -85,12 +78,8 @@ export function CreateTicketForm({ onSearchChange }: CreateTicketFormProps) {
     mutationFn: async (data: TicketFormData) => {
       if (!currentUser) throw new Error("User not found");
 
-      const tenantId = currentUser.tenant_id || 1;
-
-      // Generate ticket number per-tenant
-      const { data: ticketNumber } = await supabase.rpc("generate_helpdesk_ticket_number", {
-        p_tenant_id: tenantId,
-      });
+      // Generate ticket number
+      const { data: ticketNumber } = await supabase.rpc("generate_helpdesk_ticket_number", {});
 
       // Insert ticket
       const { data: ticket, error } = await supabase
@@ -103,7 +92,6 @@ export function CreateTicketForm({ onSearchChange }: CreateTicketFormProps) {
           category_id: parseInt(data.category_id),
           status: "open",
           requester_id: currentUser.id,
-          tenant_id: tenantId,
         })
         .select()
         .single();

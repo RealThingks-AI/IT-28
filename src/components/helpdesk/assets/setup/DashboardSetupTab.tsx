@@ -49,15 +49,6 @@ export function DashboardSetupTab() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
-
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("tenant_id")
-        .eq("id", user.id)
-        .maybeSingle();
-
       // @ts-ignore - Bypass complex type inference
       const { data: existing } = await supabase
         .from("itam_settings")

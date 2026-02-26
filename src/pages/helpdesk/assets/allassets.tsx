@@ -19,10 +19,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import * as XLSX from "xlsx";
-
-// XLSX export utility (same as AssetModuleTopBar)
-const exportToXLSX = (data: any[], filename: string, columns: { id: string; label: string }[]) => {
+// XLSX export utility - dynamically loaded
+const exportToXLSX = async (data: any[], filename: string, columns: { id: string; label: string }[]) => {
   if (!data || data.length === 0) { toast.error("No data to export"); return; }
   const resolveValue = (item: any, colId: string): string => {
     switch (colId) {
@@ -50,6 +48,7 @@ const exportToXLSX = (data: any[], filename: string, columns: { id: string; labe
     columns.forEach(col => { row[col.label] = resolveValue(item, col.id); });
     return row;
   });
+  const XLSX = await import("xlsx");
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Assets");
@@ -75,18 +74,13 @@ export default function AllAssets() {
   const [localSearch, setLocalSearch] = useState(searchParams.get("search") || "");
   const { categories } = useAssetSetupConfig();
   const { assetColumns: savedColumns } = useUISettings();
-  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
-
   // Confirmation dialog states
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean; title: string; description: string; action: () => void; variant: "default" | "destructive";
   }>({ open: false, title: "", description: "", action: () => {}, variant: "default" });
 
-  // Find portal target
-  useEffect(() => {
-    const el = document.getElementById("helpdesk-header-left");
-    setPortalTarget(el);
-  }, []);
+  // Sync portal target directly (no useEffect delay)
+  const portalTarget = document.getElementById("module-header-portal");
 
   // Sync URL params to filters
   useEffect(() => {
@@ -159,7 +153,7 @@ export default function AllAssets() {
           placeholder="Search assets..."
           value={localSearch}
           onChange={(e) => setLocalSearch(e.target.value)}
-          className="pl-7 pr-7 h-7 w-[180px] text-xs"
+          className="pl-7 pr-7 h-7 w-[280px] text-xs"
         />
         {localSearch && (
           <Button type="button" variant="ghost" size="icon" onClick={() => setLocalSearch("")} className="absolute right-0.5 top-1/2 -translate-y-1/2 h-5 w-5">
@@ -176,7 +170,7 @@ export default function AllAssets() {
 
       {/* Filters */}
       <Select value={filters.status || "all"} onValueChange={handleStatusChange}>
-        <SelectTrigger className="w-[120px] h-7 text-xs">
+        <SelectTrigger className="w-[160px] h-7 text-xs">
           <SelectValue placeholder="Status" />
         </SelectTrigger>
         <SelectContent>
@@ -188,7 +182,7 @@ export default function AllAssets() {
       </Select>
 
       <Select value={filters.typeName || "all"} onValueChange={handleTypeChange}>
-        <SelectTrigger className="w-[120px] h-7 text-xs">
+        <SelectTrigger className="w-[160px] h-7 text-xs">
           <SelectValue placeholder="Type" />
         </SelectTrigger>
         <SelectContent>
@@ -212,7 +206,6 @@ export default function AllAssets() {
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm" className="h-7 text-xs gap-1">
               Actions
-              <ChevronDown className="h-3 w-3" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48 bg-popover">
@@ -231,19 +224,49 @@ export default function AllAssets() {
             {bulkSelectMode && selectedAssetIds.length > 0 && bulkActions && (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={bulkActions.handleCheckOut}>
+                <DropdownMenuItem onClick={() => setConfirmDialog({
+                  open: true,
+                  title: "Check Out Assets",
+                  description: `Are you sure you want to check out ${selectedAssetIds.length} asset(s)? This will mark them as in use. Note: Bulk check-out does not assign to a specific user. Use the individual check-out action to assign assets.`,
+                  action: bulkActions.handleCheckOut,
+                  variant: "default",
+                })}>
                   <UserCheck className="mr-2 h-3.5 w-3.5" />Check Out ({selectedAssetIds.length})
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={bulkActions.handleCheckIn}>
+                <DropdownMenuItem onClick={() => setConfirmDialog({
+                  open: true,
+                  title: "Check In Assets",
+                  description: `Are you sure you want to check in ${selectedAssetIds.length} asset(s)? This will mark them as available and close any open assignments.`,
+                  action: bulkActions.handleCheckIn,
+                  variant: "default",
+                })}>
                   <UserCheck className="mr-2 h-3.5 w-3.5" />Check In ({selectedAssetIds.length})
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={bulkActions.handleMaintenance}>
-                  <Wrench className="mr-2 h-3.5 w-3.5" />Maintenance ({selectedAssetIds.length})
+                <DropdownMenuItem onClick={() => setConfirmDialog({
+                  open: true,
+                  title: "Send for Repair",
+                  description: `Are you sure you want to send ${selectedAssetIds.length} asset(s) for repair/maintenance?`,
+                  action: bulkActions.handleMaintenance,
+                  variant: "default",
+                })}>
+                  <Wrench className="mr-2 h-3.5 w-3.5" />Repair ({selectedAssetIds.length})
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={bulkActions.handleDispose}>
+                <DropdownMenuItem onClick={() => setConfirmDialog({
+                  open: true,
+                  title: "Dispose Assets",
+                  description: `Are you sure you want to dispose ${selectedAssetIds.length} asset(s)? This will mark them as disposed.`,
+                  action: bulkActions.handleDispose,
+                  variant: "destructive",
+                })}>
                   <Package className="mr-2 h-3.5 w-3.5" />Dispose ({selectedAssetIds.length})
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={bulkActions.handleDelete} className="text-destructive">
+                <DropdownMenuItem onClick={() => setConfirmDialog({
+                  open: true,
+                  title: "Delete Assets",
+                  description: `Are you sure you want to delete ${selectedAssetIds.length} asset(s)? This action can be reversed by an administrator.`,
+                  action: bulkActions.handleDelete,
+                  variant: "destructive",
+                })} className="text-destructive">
                   <Trash2 className="mr-2 h-3.5 w-3.5" />Delete ({selectedAssetIds.length})
                 </DropdownMenuItem>
               </>

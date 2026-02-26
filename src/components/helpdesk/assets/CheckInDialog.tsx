@@ -19,6 +19,7 @@ import { format } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { ASSET_STATUS } from "@/lib/assetStatusUtils";
+import { invalidateAllAssetQueries } from "@/lib/assetQueryUtils";
 
 interface CheckInDialogProps {
   open: boolean;
@@ -76,18 +77,7 @@ export function CheckInDialog({ open, onOpenChange, assetId, assetName, onSucces
     },
     onSuccess: () => {
       toast.success("Asset checked in successfully");
-      // Comprehensive query invalidation
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets"] });
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets-count"] });
-      queryClient.invalidateQueries({ queryKey: ["itam-asset-detail"] });
-      queryClient.invalidateQueries({ queryKey: ["itam-active-assignments"] });
-      queryClient.invalidateQueries({ queryKey: ["itam-assets-dashboard-full"] });
-      queryClient.invalidateQueries({ queryKey: ["itam-recent-checkins"] });
-      queryClient.invalidateQueries({ queryKey: ["itam-recent-checkouts"] });
-      queryClient.invalidateQueries({ queryKey: ["employee-asset-counts"] });
-      queryClient.invalidateQueries({ queryKey: ["employee-assets"] });
-      queryClient.invalidateQueries({ queryKey: ["asset-history"] });
-      queryClient.invalidateQueries({ queryKey: ["asset-events"] });
+      invalidateAllAssetQueries(queryClient);
       onSuccess?.();
       onOpenChange(false);
       // Reset form

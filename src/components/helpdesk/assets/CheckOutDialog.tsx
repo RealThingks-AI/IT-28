@@ -33,19 +33,7 @@ interface CheckOutDialogProps {
   onSuccess?: () => void;
 }
 
-// Helper function to invalidate all asset-related queries
-const invalidateAllAssetQueries = (queryClient: ReturnType<typeof useQueryClient>) => {
-  queryClient.invalidateQueries({ queryKey: ["helpdesk-assets"] });
-  queryClient.invalidateQueries({ queryKey: ["helpdesk-assets-count"] });
-  queryClient.invalidateQueries({ queryKey: ["itam-asset-detail"] });
-  queryClient.invalidateQueries({ queryKey: ["itam-assets-dashboard-full"] });
-  queryClient.invalidateQueries({ queryKey: ["itam-recent-checkins"] });
-  queryClient.invalidateQueries({ queryKey: ["itam-recent-checkouts"] });
-  queryClient.invalidateQueries({ queryKey: ["employee-asset-counts"] });
-  queryClient.invalidateQueries({ queryKey: ["employee-assets"] });
-  queryClient.invalidateQueries({ queryKey: ["asset-history"] });
-  queryClient.invalidateQueries({ queryKey: ["asset-events"] });
-};
+import { invalidateAllAssetQueries } from "@/lib/assetQueryUtils";
 
 export function CheckOutDialog({ open, onOpenChange, assetId, assetName, onSuccess }: CheckOutDialogProps) {
   const queryClient = useQueryClient();
@@ -77,7 +65,7 @@ export function CheckOutDialog({ open, onOpenChange, assetId, assetName, onSucce
     queryFn: async () => {
       const { data } = await supabase
         .from("itam_assets")
-        .select("status, assigned_to, tenant_id")
+        .select("status, assigned_to")
         .eq("id", assetId)
         .single();
       return data;
@@ -196,7 +184,6 @@ export function CheckOutDialog({ open, onOpenChange, assetId, assetName, onSucce
             assigned_at: checkoutTimestamp,
             assigned_by: currentUser?.id,
             notes: notes || null,
-            tenant_id: freshAsset?.tenant_id,
           });
 
         if (assignmentError) throw assignmentError;
@@ -234,7 +221,7 @@ export function CheckOutDialog({ open, onOpenChange, assetId, assetName, onSucce
         details: historyDetails,
         new_value: checkoutTo === "person" ? (selectedUser?.name || selectedUser?.email) : "Location",
         performed_by: currentUser?.id,
-        tenant_id: freshAsset?.tenant_id,
+        
       });
     },
     onSuccess: () => {

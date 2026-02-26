@@ -29,7 +29,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { getUserDisplayName } from "@/lib/userUtils";
-import { useOrganisationUsers } from "@/hooks/useUsers";
+import { useUsers } from "@/hooks/useUsers";
 
 const assignSchema = z.object({
   assignee_id: z.string().min(1, "Please select an assignee"),
@@ -45,7 +45,7 @@ export const AssignTicketDialog = ({ open, onOpenChange, ticket }: AssignTicketD
   const queryClient = useQueryClient();
 
   // Use shared hook instead of custom query
-  const { data: users = [] } = useOrganisationUsers();
+  const { data: users = [] } = useUsers();
 
   const form = useForm<z.infer<typeof assignSchema>>({
     resolver: zodResolver(assignSchema),

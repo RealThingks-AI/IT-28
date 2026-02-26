@@ -1,10 +1,11 @@
-import { Package, LayoutDashboard, List, PlusCircle, LogOut, LogIn, Settings } from "lucide-react";
+import { Package, LayoutDashboard, List, PlusCircle, LogOut, LogIn, Settings, ScrollText } from "lucide-react";
 import ModuleLayout from "./ModuleLayout";
 import type { SidebarItem } from "@/components/ModuleSidebar";
 
 const assetsSidebarItems: SidebarItem[] = [
   { title: "Dashboard", url: "/assets/dashboard", icon: LayoutDashboard },
   { title: "All Assets", url: "/assets/allassets", icon: List },
+  { title: "Logs", url: "/assets/logs", icon: ScrollText },
   { title: "Add Asset", url: "/assets/add", icon: PlusCircle },
   { title: "Check Out", url: "/assets/checkout", icon: LogOut },
   { title: "Check In", url: "/assets/checkin", icon: LogIn },

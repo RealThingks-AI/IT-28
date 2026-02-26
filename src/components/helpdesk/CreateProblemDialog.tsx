@@ -69,16 +69,9 @@ export const CreateProblemDialog = ({
         .eq("auth_user_id", user.id)
         .maybeSingle();
 
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("tenant_id")
-        .eq("id", user.id)
-        .maybeSingle();
-
       return {
         authUserId: user.id,
         userId: userRecord?.id,
-        tenantId: profileData?.tenant_id || 1,
       };
     },
   });
@@ -129,13 +122,9 @@ export const CreateProblemDialog = ({
         throw new Error("User data not available");
       }
 
-      const tenantId = userData.tenantId || 1;
-
       const { data: problemNumber, error: numberError } = await supabase.rpc(
         "generate_problem_number",
-        {
-          p_tenant_id: tenantId,
-        }
+        {}
       );
 
       if (numberError) throw numberError;
@@ -152,7 +141,6 @@ export const CreateProblemDialog = ({
           workaround: data.workaround || null,
           status: "open",
           created_by: userData.authUserId,
-          tenant_id: tenantId,
         })
         .select("id")
         .single();

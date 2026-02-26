@@ -53,20 +53,10 @@ export function DocumentsGalleryDialog() {
   });
 
   const uploadDocMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const fileExt = file.name.split(".").pop();
-      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-      const { error: uploadError } = await supabase.storage.from("asset-documents").upload(fileName, file);
-      if (uploadError) throw uploadError;
-      const { data: { publicUrl } } = supabase.storage.from("asset-documents").getPublicUrl(fileName);
-      const { error: dbError } = await supabase.from("itam_asset_documents").insert({
-        asset_id: "00000000-0000-0000-0000-000000000000",
-        name: file.name, document_type: "general", file_path: publicUrl, file_size: file.size, mime_type: file.type,
-      });
-      if (dbError) throw dbError;
+    mutationFn: async (_file: File) => {
+      throw new Error("Documents should be added from each asset's detail page");
     },
-    onSuccess: () => { toast.success("Document uploaded successfully"); queryClient.invalidateQueries({ queryKey: ["asset-documents-all"] }); refetchDocs(); },
-    onError: (error) => { toast.error("Failed to upload document"); console.error(error); },
+    onError: () => { toast.info("To add documents, open an asset and use the Docs tab"); },
   });
 
   const deleteDocMutation = useMutation({
@@ -104,7 +94,7 @@ export function DocumentsGalleryDialog() {
               <CardDescription className="text-xs">Browse asset documents</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="text-xs text-muted-foreground mb-2">{documents?.length || 0} documents</div>
+              <div className="text-xs text-muted-foreground mb-2">{documents?.length || 0} {(documents?.length || 0) === 1 ? 'document' : 'documents'}</div>
               <Button variant="outline" className="w-full h-8 text-xs">Open Gallery</Button>
             </CardContent>
           </Card>
@@ -115,13 +105,11 @@ export function DocumentsGalleryDialog() {
             <DialogDescription>Browse, upload, and manage asset documents</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <Label htmlFor="doc-upload" className="cursor-pointer">
-                <Button variant="outline" size="sm" disabled={uploadingDoc} asChild>
-                  <span><Plus className="h-4 w-4 mr-2" />{uploadingDoc ? "Uploading..." : "Add Document"}</span>
-                </Button>
-              </Label>
-              <Input id="doc-upload" type="file" onChange={handleDocUpload} className="hidden" />
+            <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
+              <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+              <p className="text-xs text-muted-foreground">
+                This is a read-only global view. To add documents, open an asset and use the <strong>Docs</strong> tab.
+              </p>
             </div>
             <div className="divide-y rounded-md border">
               {documents?.map((doc) => {

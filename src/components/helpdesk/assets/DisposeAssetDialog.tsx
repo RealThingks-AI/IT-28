@@ -27,6 +27,7 @@ import { format } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { ASSET_STATUS } from "@/lib/assetStatusUtils";
+import { invalidateAllAssetQueries } from "@/lib/assetQueryUtils";
 
 interface DisposeAssetDialogProps {
   open: boolean;
@@ -56,19 +57,29 @@ export function DisposeAssetDialog({ open, onOpenChange, assetId, assetName, onS
     mutationFn: async () => {
       const { data: { user: currentUser } } = await supabase.auth.getUser();
 
-      // Get tenant_id from the asset
+      // Get full asset data including custom_fields
       const { data: assetData } = await supabase
         .from("itam_assets")
-        .select("tenant_id, status, purchase_price")
+        .select("status, purchase_price, custom_fields")
         .eq("id", assetId)
         .single();
 
-      // Update asset status to disposed
+      // Merge disposal data into existing custom_fields
+      const existingCustomFields = (assetData?.custom_fields as Record<string, any>) || {};
+      const mergedCustomFields = {
+        ...existingCustomFields,
+        disposal_method: disposalMethod,
+        disposal_date: disposalDate.toISOString(),
+        disposal_value: disposalValue ? parseFloat(disposalValue) : null,
+        disposal_notes: notes || null,
+      };
+
+      // Update asset status to disposed with merged custom_fields
       const { error: assetError } = await supabase
         .from("itam_assets")
         .update({ 
           status: ASSET_STATUS.DISPOSED,
-          // Clear assignment fields
+          custom_fields: mergedCustomFields,
           assigned_to: null,
           checked_out_to: null,
           checked_out_at: null,
@@ -92,14 +103,11 @@ export function DisposeAssetDialog({ open, onOpenChange, assetId, assetName, onS
           notes,
         },
         performed_by: currentUser?.id,
-        tenant_id: assetData?.tenant_id,
       });
     },
     onSuccess: () => {
       toast.success("Asset disposed successfully");
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets"] });
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets-count"] });
-      queryClient.invalidateQueries({ queryKey: ["itam-asset-detail"] });
+      invalidateAllAssetQueries(queryClient);
       onSuccess?.();
       onOpenChange(false);
       // Reset form
@@ -178,17 +186,13 @@ export function DisposeAssetDialog({ open, onOpenChange, assetId, assetName, onS
               <Label htmlFor="disposalValue">
                 {disposalMethod === "sold" ? "Sale Value" : "Return Value"}
               </Label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₹</span>
-                <Input
-                  id="disposalValue"
-                  type="number"
-                  value={disposalValue}
-                  onChange={(e) => setDisposalValue(e.target.value)}
-                  placeholder="0.00"
-                  className="pl-7"
-                />
-              </div>
+              <Input
+                id="disposalValue"
+                type="number"
+                value={disposalValue}
+                onChange={(e) => setDisposalValue(e.target.value)}
+                placeholder="0.00"
+              />
             </div>
           )}
 

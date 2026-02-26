@@ -65,13 +65,7 @@ export const TicketTemplatesManager = () => {
         .eq("auth_user_id", user.id)
         .single();
       
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("tenant_id")
-        .eq("id", user.id)
-        .maybeSingle();
-      
-      return { ...data, tenantId: profileData?.tenant_id || 1 };
+      return data;
     },
   });
 
@@ -111,7 +105,6 @@ export const TicketTemplatesManager = () => {
         priority: priority || null,
         category_id: categoryId ? parseInt(categoryId) : null,
         is_active: isActive,
-        tenant_id: currentUser.tenantId || 1,
         created_by: currentUser.id,
       };
 
@@ -169,7 +162,6 @@ export const TicketTemplatesManager = () => {
           priority: template.priority,
           category_id: template.category_id,
           is_active: false,
-          tenant_id: currentUser.tenantId || 1,
           created_by: currentUser.id,
         });
       if (error) throw error;

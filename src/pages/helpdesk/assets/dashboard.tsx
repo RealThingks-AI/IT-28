@@ -164,7 +164,7 @@ const AssetDashboard = () => {
     queryFn: async () => {
       const {
         data
-      } = await supabase.from("itam_repairs").select("*, asset:itam_assets(id, name, asset_tag)").eq("status", "pending").order("scheduled_date", {
+      } = await supabase.from("itam_repairs").select("*, asset:itam_assets(id, name, asset_tag)").eq("status", "pending").order("started_at", {
         ascending: true
       }).limit(10);
       return data || [];
@@ -176,6 +176,13 @@ const AssetDashboard = () => {
   const activeAssets = assets.filter(a => a.status !== "disposed" && a.status !== "lost").length;
   const availableAssets = assets.filter(a => a.status === "available").length;
   const totalValue = assets.reduce((sum, a) => sum + (parseFloat(String(a.purchase_price || 0)) || 0), 0);
+  
+  // Detect mixed currencies
+  const currenciesUsed = new Set(assets.map(a => {
+    const cf = a.custom_fields as Record<string, any> | null;
+    return cf?.currency || "INR";
+  }));
+  const hasMixedCurrencies = currenciesUsed.size > 1;
   const checkedOutCount = assets.filter(a => a.status === "in_use").length;
   const underRepairCount = assets.filter(a => a.status === "maintenance").length;
   const disposedCount = assets.filter(a => a.status === "disposed").length;
@@ -216,7 +223,8 @@ const AssetDashboard = () => {
           date: new Date(asset.warranty_expiry),
           title: asset.asset_tag || asset.name || "Asset",
           type: "warranty",
-          assetId: Number(asset.id)
+          assetId: Number(asset.id),
+          assetTag: asset.asset_tag || undefined
         });
       }
     });
@@ -231,16 +239,19 @@ const AssetDashboard = () => {
           date: new Date(repairDate),
           title: repair.asset?.asset_tag || "Maintenance",
           type: "maintenance",
-          assetId: Number(repair.asset_id)
+          assetId: Number(repair.asset_id),
+          assetTag: repair.asset?.asset_tag || undefined
         });
       }
     });
     return events;
   }, [expiringWarranties, maintenanceDue]);
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-IN', {
+  const formatCurrency = (value: number, currencyCode?: string) => {
+    const code = currencyCode || "INR";
+    const locale = code === "INR" ? "en-IN" : "en-US";
+    return new Intl.NumberFormat(locale, {
       style: 'currency',
-      currency: 'INR',
+      currency: code,
       minimumFractionDigits: 0,
       maximumFractionDigits: 0
     }).format(value);
@@ -297,13 +308,7 @@ const AssetDashboard = () => {
     navigate(`/assets/allassets?search=${encodeURIComponent(query)}`);
   };
 
-  return <div className="min-h-screen bg-background">
-      <AssetModuleTopBar 
-        onManageDashboard={() => setManageDialogOpen(true)} 
-        onSearch={handleGlobalSearch}
-        showColumnSettings={false}
-        showExport={false}
-      />
+  return <div className="bg-background">
 
       <div className="p-4 space-y-4">
 
@@ -319,7 +324,7 @@ const AssetDashboard = () => {
             case "availableAssets":
               return <AssetStatCard key={widget.id} title="Available Assets" value={availableAssets} subtitle={`Value: ${formatCurrency(assets.filter(a => a.status === "available").reduce((sum, a) => sum + (parseFloat(String(a.purchase_price || 0)) || 0), 0))}`} icon={CheckCircle2} iconBgColor="bg-green-500" iconColor="text-white" onClick={() => navigate("/assets/allassets?status=available")} animationDelay={animationDelay} />;
             case "assetValue":
-              return <AssetStatCard key={widget.id} title="Value of Assets" value={formatCurrency(totalValue)} subtitle="Total purchase value" icon={DollarSign} iconBgColor="bg-purple-500" iconColor="text-white" animationDelay={animationDelay} />;
+              return <AssetStatCard key={widget.id} title="Value of Assets" value={formatCurrency(totalValue)} subtitle={hasMixedCurrencies ? "Mixed currencies — approximate" : "Total purchase value"} icon={DollarSign} iconBgColor="bg-purple-500" iconColor="text-white" animationDelay={animationDelay} />;
             case "fiscalPurchases":
               return <AssetStatCard key={widget.id} title="Purchases in Fiscal Year" value={formatCurrency(fiscalYearValue)} subtitle={`${fiscalYearPurchases.length} assets purchased`} icon={ShoppingCart} iconBgColor="bg-orange-500" iconColor="text-white" animationDelay={animationDelay} />;
             case "checkedOut":
@@ -391,7 +396,7 @@ const AssetDashboard = () => {
 
                   <TabsContent value="checkedin" className="mt-0 max-h-[250px] overflow-y-auto">
                     {recentCheckins.length > 0 ? <div className="divide-y">
-                        {recentCheckins.map(checkin => <div key={checkin.id} className="p-3 hover:bg-accent cursor-pointer transition-colors duration-150" onClick={() => navigate(`/assets/detail/${checkin.asset_id}`)}>
+                        {recentCheckins.map(checkin => <div key={checkin.id} className="p-3 hover:bg-accent cursor-pointer transition-colors duration-150" onClick={() => navigate(`/assets/detail/${checkin.asset?.asset_tag || checkin.asset?.asset_id}`)}>
                             <div className="flex items-center justify-between gap-2">
                               <div className="min-w-0 flex-1">
                                 <p className="text-sm font-medium truncate">{checkin.asset?.asset_tag || checkin.asset?.asset_id}</p>
@@ -409,7 +414,7 @@ const AssetDashboard = () => {
 
                   <TabsContent value="checkedout" className="mt-0 max-h-[250px] overflow-y-auto">
                     {recentCheckouts.length > 0 ? <div className="divide-y">
-                        {recentCheckouts.map(checkout => <div key={checkout.id} className="p-3 hover:bg-accent cursor-pointer transition-colors duration-150" onClick={() => navigate(`/assets/detail/${checkout.asset_id}`)}>
+                        {recentCheckouts.map(checkout => <div key={checkout.id} className="p-3 hover:bg-accent cursor-pointer transition-colors duration-150" onClick={() => navigate(`/assets/detail/${checkout.asset?.asset_tag || checkout.asset?.asset_id}`)}>
                             <div className="flex items-center justify-between gap-2">
                               <div className="min-w-0 flex-1">
                                 <p className="text-sm font-medium truncate">{checkout.asset?.asset_tag || checkout.asset?.asset_id}</p>
@@ -445,7 +450,7 @@ const AssetDashboard = () => {
 
                   <TabsContent value="new" className="mt-0 max-h-[250px] overflow-y-auto">
                     {newAssets.length > 0 ? <div className="divide-y">
-                        {newAssets.map(asset => <div key={asset.id} className="p-3 hover:bg-accent cursor-pointer transition-colors duration-150" onClick={() => navigate(`/assets/detail/${asset.id}`)}>
+                        {newAssets.map(asset => <div key={asset.id} className="p-3 hover:bg-accent cursor-pointer transition-colors duration-150" onClick={() => navigate(`/assets/detail/${asset.asset_tag || asset.asset_id}`)}>
                             <div className="flex items-center justify-between gap-2">
                               <div className="min-w-0 flex-1">
                                 <p className="text-sm font-medium truncate">{asset.asset_tag || asset.asset_id}</p>
@@ -463,7 +468,7 @@ const AssetDashboard = () => {
 
                   <TabsContent value="disposed" className="mt-0 max-h-[250px] overflow-y-auto">
                     {disposedAssets.length > 0 ? <div className="divide-y">
-                        {disposedAssets.map(asset => <div key={asset.id} className="p-3 hover:bg-accent cursor-pointer transition-colors duration-150" onClick={() => navigate(`/assets/detail/${asset.id}`)}>
+                        {disposedAssets.map(asset => <div key={asset.id} className="p-3 hover:bg-accent cursor-pointer transition-colors duration-150" onClick={() => navigate(`/assets/detail/${asset.asset_tag || asset.asset_id}`)}>
                             <div className="flex items-center justify-between gap-2">
                               <div className="min-w-0 flex-1">
                                 <p className="text-sm font-medium truncate">{asset.asset_tag || asset.asset_id}</p>

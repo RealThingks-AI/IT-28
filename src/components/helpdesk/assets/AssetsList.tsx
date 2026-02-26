@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { sanitizeSearchInput } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import { AssetPhotoPreview } from "./AssetPhotoPreview";
 import { AssetActionsMenu } from "./AssetActionsMenu";
 import { useUISettings } from "@/hooks/useUISettings";
 import { ASSET_STATUS } from "@/lib/assetStatusUtils";
+import { invalidateAllAssetQueries } from "@/lib/assetQueryUtils";
 
 interface AssetsListProps {
   filters?: Record<string, any>;
@@ -74,7 +76,7 @@ export function AssetsList({
   const queryClient = useQueryClient();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(500);
+  const [pageSize, setPageSize] = useState(100);
   const [sortColumn, setSortColumn] = useState<SortColumn>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
 
@@ -159,8 +161,9 @@ export function AssetsList({
       eq("is_active", true);
 
       if (filters.search) {
+        const s = sanitizeSearchInput(filters.search);
         query = query.or(
-          `name.ilike.%${filters.search}%,asset_tag.ilike.%${filters.search}%,serial_number.ilike.%${filters.search}%`
+          `name.ilike.%${s}%,asset_tag.ilike.%${s}%,serial_number.ilike.%${s}%`
         );
       }
       if (filters.status) {
@@ -174,7 +177,7 @@ export function AssetsList({
       if (error) throw error;
       return count || 0;
     },
-    staleTime: 30000
+    staleTime: 5 * 60 * 1000,
   });
 
   // Fetch paginated assets with related data
@@ -198,8 +201,9 @@ export function AssetsList({
       range(from, to);
 
       if (filters.search) {
+        const s = sanitizeSearchInput(filters.search);
         query = query.or(
-          `name.ilike.%${filters.search}%,asset_tag.ilike.%${filters.search}%,serial_number.ilike.%${filters.search}%`
+          `name.ilike.%${s}%,asset_tag.ilike.%${s}%,serial_number.ilike.%${s}%`
         );
       }
       if (filters.status) {
@@ -255,7 +259,7 @@ export function AssetsList({
       if (error) throw error;
       return data || [];
     },
-    staleTime: 30000
+    staleTime: 5 * 60 * 1000,
   });
 
   // Fetch users for assigned_to lookup
@@ -265,7 +269,7 @@ export function AssetsList({
       const { data } = await supabase.from("users").select("id, name, email");
       return data || [];
     },
-    staleTime: 60000
+    staleTime: 5 * 60 * 1000,
   });
 
   // Helper to get user name by ID or return original value if not a UUID
@@ -281,26 +285,65 @@ export function AssetsList({
     return assignedTo;
   };
 
-  // Notify parent when data changes (for export)
+  // Notify parent when data changes (for export) — use ref to avoid re-render loops
+  const onDataLoadRef = useRef(onDataLoad);
+  onDataLoadRef.current = onDataLoad;
   useEffect(() => {
-    if (onDataLoad && assets.length > 0) {
-      onDataLoad(assets);
+    if (onDataLoadRef.current && assets.length > 0) {
+      onDataLoadRef.current(assets);
     }
-  }, [assets, onDataLoad]);
+  }, [assets]);
 
   const totalPages = Math.ceil(totalCount / pageSize);
 
   const updateStatus = useMutation({
     mutationFn: async ({ ids, status }: {ids: string[];status: string;}) => {
-      const { error } = await supabase.
-      from("itam_assets").
-      update({ status }).
-      in("id", ids);
-      if (error) throw error;
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      
+      // For check-in: close open assignments and clear assignment fields
+      if (status === ASSET_STATUS.AVAILABLE) {
+        const now = new Date().toISOString();
+        // Close open assignments
+        for (const id of ids) {
+          await supabase
+            .from("itam_asset_assignments")
+            .update({ returned_at: now })
+            .eq("asset_id", id)
+            .is("returned_at", null);
+        }
+        // Clear assignment fields
+        const { error } = await supabase
+          .from("itam_assets")
+          .update({ 
+            status,
+            assigned_to: null,
+            checked_out_to: null,
+            checked_out_at: null,
+            expected_return_date: null,
+            check_out_notes: null,
+          })
+          .in("id", ids);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("itam_assets")
+          .update({ status })
+          .in("id", ids);
+        if (error) throw error;
+      }
+
+      // Log history for each asset
+      const historyEntries = ids.map(id => ({
+        asset_id: id,
+        action: `bulk_status_change`,
+        new_value: status,
+        details: { bulk_action: true, new_status: status },
+        performed_by: currentUser?.id,
+      }));
+      await supabase.from("itam_asset_history").insert(historyEntries);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets"] });
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets-count"] });
+      invalidateAllAssetQueries(queryClient);
       toast.success("Assets updated");
       setSelectedIds([]);
     }
@@ -308,15 +351,24 @@ export function AssetsList({
 
   const deleteAssets = useMutation({
     mutationFn: async (ids: string[]) => {
-      const { error } = await supabase.
-      from("itam_assets").
-      update({ is_active: false }).
-      in("id", ids);
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      const { error } = await supabase
+        .from("itam_assets")
+        .update({ is_active: false })
+        .in("id", ids);
       if (error) throw error;
+
+      // Log history for each deleted asset
+      const historyEntries = ids.map(id => ({
+        asset_id: id,
+        action: "deleted",
+        details: { bulk_action: true },
+        performed_by: currentUser?.id,
+      }));
+      await supabase.from("itam_asset_history").insert(historyEntries);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets"] });
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets-count"] });
+      invalidateAllAssetQueries(queryClient);
       toast.success("Assets deleted");
       setSelectedIds([]);
     }
@@ -442,8 +494,13 @@ export function AssetsList({
       case "serial_number":
         return asset.serial_number || "—";
 
-      case "asset_classification":
-        return customFields.classification || "—";
+      case "asset_classification": {
+        const clf = customFields.classification;
+        if (Array.isArray(clf) && clf.length > 0) {
+          return clf.map((c: string) => c.charAt(0).toUpperCase() + c.slice(1)).join(", ");
+        }
+        return typeof clf === "string" && clf ? clf : "—";
+      }
 
       case "asset_configuration":
         return customFields.asset_configuration || "—";
@@ -497,18 +554,45 @@ export function AssetsList({
 
   if (isLoading) {
     return (
-      <div className="space-y-2">
-        {[1, 2, 3, 4, 5].map((i) =>
-        <Skeleton key={i} className="h-12 w-full" />
-        )}
-      </div>);
-
+      <div className="flex flex-col h-full">
+        <div className="flex-1 overflow-auto rounded-md border">
+          <table className="w-full caption-bottom text-sm">
+            <TableHeader className="sticky top-0 z-10 bg-muted">
+              <TableRow className="border-b-2 border-border">
+                <TableHead className="w-12 py-1"><Skeleton className="h-4 w-6" /></TableHead>
+                {activeColumns.filter(c => c.visible).slice(0, 8).map((col) => (
+                  <TableHead key={col.id} className="py-1">
+                    <Skeleton className="h-4 w-16" />
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {Array.from({ length: 10 }).map((_, i) => (
+                <TableRow key={i} className="border-b border-border">
+                  <TableCell className="py-1"><Skeleton className="h-4 w-6" /></TableCell>
+                  {activeColumns.filter(c => c.visible).slice(0, 8).map((col) => (
+                    <TableCell key={col.id} className="py-1">
+                      <Skeleton className="h-4 w-full" />
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+            </TableBody>
+          </table>
+        </div>
+        <div className="shrink-0 border-t px-6 py-2 flex items-center justify-between">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-7 w-48" />
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-auto rounded-md border">
-        <table className="w-full caption-bottom text-sm">
+      <div className="flex-1 overflow-x-auto overflow-y-auto rounded-md border">
+        <table className="w-full caption-bottom text-sm" style={{ tableLayout: "auto" }}>
           <TableHeader className="sticky top-0 z-10 bg-muted">
             <TableRow className="border-b-2 border-border">
               {showSelection && (
@@ -563,7 +647,7 @@ export function AssetsList({
             <TableRow
               key={asset.id}
               className="cursor-pointer hover:bg-muted/50 border-b border-border transition-colors"
-              onClick={() => navigate(`/assets/detail/${asset.id}`)}>
+              onClick={() => navigate(`/assets/detail/${asset.asset_tag || asset.id}`)}>
 
                   {showSelection && (
                     <TableCell onClick={(e) => e.stopPropagation()} className="whitespace-nowrap py-1">
@@ -617,7 +701,7 @@ export function AssetsList({
                 setPage(1);
               }}>
 
-              <SelectTrigger className="w-[60px] h-7 text-xs">
+              <SelectTrigger className="w-[70px] h-7 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

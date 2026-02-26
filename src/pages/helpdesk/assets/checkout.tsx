@@ -16,16 +16,17 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { CalendarIcon, Search, UserCheck, X } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { useOrganisationUsers } from "@/hooks/useUsers";
+import { cn, sanitizeSearchInput } from "@/lib/utils";
+import { useUsers } from "@/hooks/useUsers";
 import { getUserDisplayName } from "@/lib/userUtils";
+import { invalidateAllAssetQueries } from "@/lib/assetQueryUtils";
 
 const CheckoutPage = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
-  const [assignTo, setAssignTo] = useState("");
+  const [assignTo, setAssignTo] = useState<string | undefined>(undefined);
   const [expectedReturn, setExpectedReturn] = useState<Date>();
   const [notes, setNotes] = useState("");
 
@@ -41,7 +42,8 @@ const CheckoutPage = () => {
         .order("name");
 
       if (search) {
-        query = query.or(`name.ilike.%${search}%,asset_tag.ilike.%${search}%,asset_id.ilike.%${search}%`);
+        const s = sanitizeSearchInput(search);
+        query = query.or(`name.ilike.%${s}%,asset_tag.ilike.%${s}%,asset_id.ilike.%${s}%`);
       }
 
       const { data } = await query.limit(50);
@@ -49,8 +51,8 @@ const CheckoutPage = () => {
     },
   });
 
-  // Fetch users from organisation (centralized hook)
-  const { data: users = [] } = useOrganisationUsers();
+  // Fetch users (centralized hook)
+  const { data: users = [] } = useUsers();
 
   // Checkout mutation
   const checkoutMutation = useMutation({
@@ -67,7 +69,6 @@ const CheckoutPage = () => {
         asset_id: assetId,
         assigned_to: assignTo,
         assigned_at: now,
-        expected_return_date: expectedReturn?.toISOString() || null,
         notes: notes || null,
       }));
 
@@ -82,7 +83,7 @@ const CheckoutPage = () => {
         .from("itam_assets")
         .update({ 
           status: "in_use",
-          assigned_to: assignedToName,
+          assigned_to: assignTo,
           checked_out_to: assignTo,
           checked_out_at: now,
           expected_return_date: expectedReturn?.toISOString() || null,
@@ -94,25 +95,30 @@ const CheckoutPage = () => {
 
       // Log to history for each asset
       const { data: { user: currentUser } } = await supabase.auth.getUser();
-      for (const assetId of selectedAssets) {
-        await supabase.from("itam_asset_history").insert({
-          asset_id: assetId,
-          action: "checked_out",
-          details: { 
-            assigned_to: assignedToName,
-            user_id: assignTo,
-            expected_return: expectedReturn?.toISOString(),
-            notes,
-          },
-          performed_by: currentUser?.id,
-        });
+      const { data: assetRecords } = await supabase
+        .from("itam_assets")
+        .select("id, asset_tag")
+        .in("id", selectedAssets);
+
+      const historyEntries = (assetRecords || []).map(asset => ({
+        asset_id: asset.id,
+        action: "checked_out",
+        details: { 
+          assigned_to: assignedToName,
+          user_id: assignTo,
+          expected_return: expectedReturn?.toISOString(),
+          notes,
+        },
+        performed_by: currentUser?.id,
+        asset_tag: asset.asset_tag,
+      }));
+      if (historyEntries.length > 0) {
+        await supabase.from("itam_asset_history").insert(historyEntries);
       }
     },
     onSuccess: () => {
       toast.success(`${selectedAssets.length} asset(s) checked out successfully`);
-      queryClient.invalidateQueries({ queryKey: ["itam-assets"] });
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets"] });
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets-count"] });
+      invalidateAllAssetQueries(queryClient);
       navigate("/assets/allassets");
     },
     onError: (error: any) => {
@@ -226,7 +232,7 @@ const CheckoutPage = () => {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label>Assign To *</Label>
-                <Select value={assignTo} onValueChange={setAssignTo}>
+                <Select value={assignTo || undefined} onValueChange={setAssignTo}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select person" />
                   </SelectTrigger>

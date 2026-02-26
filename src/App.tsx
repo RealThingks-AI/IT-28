@@ -3,9 +3,10 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
 import { SystemSettingsProvider } from "./contexts/SystemSettingsContext";
+import AppErrorBoundary from "./components/AppErrorBoundary";
 
 // Eagerly loaded (small, critical)
 import NotFound from "./pages/NotFound";
@@ -17,6 +18,13 @@ const PageLoader = () => (
     <div className="animate-pulse text-muted-foreground">Loading...</div>
   </div>
 );
+
+// Redirect component that preserves query params
+const FieldsSetupRedirect = () => {
+  const [searchParams] = useSearchParams();
+  const section = searchParams.get("section") || "sites";
+  return <Navigate to={`/assets/advanced?tab=setup&section=${section}`} replace />;
+};
 
 // Module Launcher (new "/" page)
 import ModuleLauncher from "./pages/ModuleLauncher";
@@ -68,7 +76,7 @@ const AllocateLicense = lazy(() => import("./pages/helpdesk/assets/licenses/allo
 const RepairsList = lazy(() => import("./pages/helpdesk/assets/repairs/index"));
 const CreateRepair = lazy(() => import("./pages/helpdesk/assets/repairs/create"));
 const RepairDetail = lazy(() => import("./pages/helpdesk/assets/repairs/detail/[repairId]"));
-const AssetAudit = lazy(() => import("./pages/helpdesk/assets/audit/index"));
+
 const AssetLogs = lazy(() => import("./pages/helpdesk/assets/AssetLogsPage"));
 const AssetsBulkActions = lazy(() => import("./pages/helpdesk/assets/explore/bulk-actions"));
 const AssetsImportExport = lazy(() => import("./pages/helpdesk/assets/import-export"));
@@ -104,9 +112,8 @@ const AdminSystemPage = lazy(() => import("./pages/admin/system"));
 const AdminBackupPage = lazy(() => import("./pages/admin/backup"));
 const AdminReportsPage = lazy(() => import("./pages/admin/reports"));
 
-// Auth & Profile
+// Auth
 const AuthConfirm = lazy(() => import("./pages/AuthConfirm"));
-const Profile = lazy(() => import("./pages/Profile"));
 const PasswordReset = lazy(() => import("./pages/PasswordReset"));
 const ResetPasswordConfirm = lazy(() => import("./pages/ResetPasswordConfirm"));
 const Notifications = lazy(() => import("./pages/Notifications"));
@@ -118,7 +125,6 @@ const queryClient = new QueryClient({
       staleTime: 5 * 60 * 1000,
       gcTime: 10 * 60 * 1000,
       refetchOnWindowFocus: false,
-      refetchOnMount: false,
       retry: 1,
     },
   },
@@ -133,6 +139,7 @@ const App = () => {
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <AuthProvider>
             <SystemSettingsProvider>
+              <AppErrorBoundary>
               <Suspense fallback={<PageLoader />}>
                 <Routes>
                   {/* Auth routes */}
@@ -143,7 +150,7 @@ const App = () => {
                   <Route path="/reset-password-confirm" element={<ResetPasswordConfirm />} />
                   <Route path="/access-denied" element={<AccessDenied />} />
                   <Route path="/status" element={<Status />} />
-                  <Route path="/profile" element={<Profile />} />
+                  <Route path="/profile" element={<Navigate to="/account" replace />} />
                   <Route path="/notifications" element={<Notifications />} />
 
                   {/* Module Launcher — new home */}
@@ -162,6 +169,7 @@ const App = () => {
                     <Route path="/tickets/assignment-rules" element={<AssignmentRules />} />
                     <Route path="/tickets/linked-problems" element={<LinkedProblems />} />
                     <Route path="/tickets/:id" element={<TicketDetail />} />
+                    
                     <Route path="/sla" element={<HelpdeskSLA />} />
                     <Route path="/queues" element={<HelpdeskQueues />} />
                     <Route path="/automation" element={<HelpdeskAutomation />} />
@@ -203,16 +211,17 @@ const App = () => {
                     <Route path="/assets/purchase-orders" element={<PurchaseOrdersList />} />
                     <Route path="/assets/purchase-orders/create-po" element={<CreatePO />} />
                     <Route path="/assets/purchase-orders/po-detail/:poId" element={<PODetail />} />
-                    <Route path="/assets/audit" element={<AssetAudit />} />
+                    
                     <Route path="/assets/logs" element={<AssetLogs />} />
                     <Route path="/assets/explore/bulk-actions" element={<AssetsBulkActions />} />
+                    
                     {/* Legacy redirects */}
                     <Route path="/assets/lists" element={<Navigate to="/assets/advanced?tab=maintenances" replace />} />
                     <Route path="/assets/lists/maintenances" element={<Navigate to="/assets/advanced?tab=maintenances" replace />} />
                     <Route path="/assets/lists/warranties" element={<Navigate to="/assets/advanced?tab=warranties" replace />} />
                     <Route path="/assets/tools" element={<Navigate to="/assets/advanced?tab=tools" replace />} />
                     <Route path="/assets/setup" element={<Navigate to="/assets/advanced?tab=setup" replace />} />
-                    <Route path="/assets/setup/fields-setup" element={<Navigate to="/assets/advanced?tab=setup" replace />} />
+                    <Route path="/assets/setup/fields-setup" element={<FieldsSetupRedirect />} />
                   </Route>
 
                   {/* ===== SUBSCRIPTION MODULE ===== */}
@@ -222,6 +231,7 @@ const App = () => {
                     <Route path="/subscription/vendors" element={<HelpdeskSubscriptionVendors />} />
                     <Route path="/subscription/licenses" element={<HelpdeskSubscriptionLicenses />} />
                     <Route path="/subscription/payments" element={<HelpdeskSubscriptionPayments />} />
+                    
                   </Route>
 
                   {/* ===== SYSTEM UPDATES MODULE ===== */}
@@ -230,6 +240,7 @@ const App = () => {
                     <Route path="/system-updates/settings" element={<SystemUpdatesSettings />} />
                     <Route path="/system-updates/devices" element={<SystemUpdatesDevices />} />
                     <Route path="/system-updates/updates" element={<SystemUpdatesUpdates />} />
+                    
                   </Route>
 
                   {/* ===== ADMIN MODULE ===== */}
@@ -240,20 +251,20 @@ const App = () => {
                     <Route path="/admin/system" element={<AdminSystemPage />} />
                     <Route path="/admin/backup" element={<AdminBackupPage />} />
                     <Route path="/admin/reports" element={<AdminReportsPage />} />
+                    
                   </Route>
 
                   {/* Legacy settings redirect to admin */}
                   <Route path="/settings" element={<Navigate to="/admin/users" replace />} />
 
-                  {/* Account (standalone within legacy layout) */}
-                  <Route path="/account" element={<HelpdeskLayout />}>
-                    <Route index element={<AccountSettings />} />
-                  </Route>
+                  {/* Account (standalone fallback) */}
+                  <Route path="/account" element={<AccountSettings />} />
 
                   {/* Catch-all */}
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>
+              </AppErrorBoundary>
             </SystemSettingsProvider>
           </AuthProvider>
         </BrowserRouter>

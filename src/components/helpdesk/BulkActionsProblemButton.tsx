@@ -24,7 +24,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
-import { useOrganisationUsers } from "@/hooks/useUsers";
+import { useUsers } from "@/hooks/useUsers";
 import { getUserDisplayName } from "@/lib/userUtils";
 
 interface BulkActionsProblemButtonProps {
@@ -36,8 +36,8 @@ export const BulkActionsProblemButton = ({ selectedIds, onClearSelection }: Bulk
   const queryClient = useQueryClient();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
-  // Use centralized organisation users hook
-  const { data: users } = useOrganisationUsers();
+  // Use centralized users hook
+  const { data: users } = useUsers();
 
   const bulkUpdateMutation = useMutation({
     mutationFn: async ({ field, value }: { field: string; value: any }) => {

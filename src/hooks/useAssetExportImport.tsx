@@ -126,10 +126,11 @@ const formatStatus = (status: string | null): string => {
 
 const formatCurrency = (amount: number | null): string => {
   if (amount === null || amount === undefined) return "";
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
+  // Use plain number format for exports (locale-neutral, no currency symbol)
+  return new Intl.NumberFormat("en-US", {
+    style: "decimal",
     minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(amount);
 };
 
@@ -428,7 +429,8 @@ export function useAssetExportImport() {
           make:itam_makes(id, name),
           vendor:itam_vendors(id, name)
         `)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .limit(10000);
 
       if (error) throw error;
       if (!assets || assets.length === 0) {
@@ -516,7 +518,7 @@ export function useAssetExportImport() {
         csvRows.push(values.join(","));
       });
 
-      const csvContent = csvRows.join("\n");
+      const csvContent = "\uFEFF" + csvRows.join("\n");
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -771,6 +773,7 @@ export function useAssetExportImport() {
   const downloadTemplate = () => {
     const headers = [
       "Asset Tag ID",
+      "Name",
       "Description",
       "Category",
       "Brand",
@@ -795,6 +798,7 @@ export function useAssetExportImport() {
 
     const exampleRow = [
       "AST-0001",
+      "Dell Latitude 5520",
       "Dell Laptop - Standard office",
       "Laptop",
       "Dell",
@@ -835,19 +839,10 @@ export function useAssetExportImport() {
     setImportErrors([]);
     setImportProgress({ current: 0, total: 0 });
 
-    const EMAIL_ALIASES: Record<string, string> = {
-      "palla.siva.prasad@realthingks.com": "siva.prasad@realthingks.com",
-      "pranay.m@realthingks.com": "pranay.marchande@realthingks.com",
-      "ramakrishna.t@realthingks.com": "ramakrishna.tondapu@realthingks.com",
-      "sidharth.d@realthingks.com": "sidharth.dhammi@realthingks.com",
-      "shraddha.n@realthingks.com": "shraddha.nandwadekar@realthingks.com",
-      "vishal.s@realthingks.com": "vishal.srivastav@realthingks.com",
-    };
-
     const PERIPHERAL_DEFS = [
-      { label: "Headphones", serialCol: 3, tagCol: 4, categoryId: "b74a9d25-2143-419f-945e-3a978c38fab0" },
-      { label: "Mouse", serialCol: 5, tagCol: 6, categoryId: "efff9267-49db-4dbe-a106-d4ee9f5e579b" },
-      { label: "Keyboard", serialCol: 7, tagCol: 8, categoryId: "8736a5f8-a761-49c1-be5d-8bb784614e3c" },
+      { label: "Headphones", serialCol: 3, tagCol: 4, categoryName: "Headphones" },
+      { label: "Mouse", serialCol: 5, tagCol: 6, categoryName: "Mouse" },
+      { label: "Keyboard", serialCol: 7, tagCol: 8, categoryName: "Keyboard" },
     ];
 
     try {
@@ -872,6 +867,20 @@ export function useAssetExportImport() {
         if (u.email) emailToUser.set(u.email.toLowerCase(), { id: u.id, name: u.name });
       });
 
+      // Resolve category IDs by name (auto-create if missing)
+      const { data: catData } = await supabase.from("itam_categories").select("id, name").eq("is_active", true);
+      const categoryLookup = (catData || []) as { id: string; name: string }[];
+      const resolvedCategoryIds: Record<string, string> = {};
+      for (const def of PERIPHERAL_DEFS) {
+        const existing = categoryLookup.find(c => c.name.toLowerCase() === def.categoryName.toLowerCase());
+        if (existing) {
+          resolvedCategoryIds[def.categoryName] = existing.id;
+        } else {
+          const { data: newCat } = await supabase.from("itam_categories").insert({ name: def.categoryName }).select("id").single();
+          if (newCat) resolvedCategoryIds[def.categoryName] = newCat.id;
+        }
+      }
+
       // Fetch existing asset tags for dedup
       const { data: existingAssets } = await supabase
         .from("itam_assets")
@@ -895,9 +904,17 @@ export function useAssetExportImport() {
         const employeeName = r[1] || "";
         const rawEmail = (r[2] || "").toLowerCase().trim();
 
-        // Resolve email via alias map
-        const resolvedEmail = EMAIL_ALIASES[rawEmail] || rawEmail;
-        const user = resolvedEmail ? emailToUser.get(resolvedEmail) : null;
+        // Fuzzy email matching: try exact match first, then match local part
+        let user = rawEmail ? emailToUser.get(rawEmail) : null;
+        if (!user && rawEmail) {
+          const localPart = rawEmail.split("@")[0];
+          for (const [email, u] of emailToUser.entries()) {
+            if (email.split("@")[0] === localPart) {
+              user = u;
+              break;
+            }
+          }
+        }
         const isStock = !rawEmail || employeeName.toLowerCase() === "stock";
 
         for (const def of PERIPHERAL_DEFS) {
@@ -927,7 +944,7 @@ export function useAssetExportImport() {
             asset_id: tag,
             name: assetName,
             serial_number: serial,
-            category_id: def.categoryId,
+            category_id: resolvedCategoryIds[def.categoryName] || null,
             status: isStock ? "available" : "in_use",
             is_active: true,
           };

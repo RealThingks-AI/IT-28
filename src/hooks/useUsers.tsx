@@ -42,6 +42,3 @@ export function useUsers() {
   });
 }
 
-// Backward-compatible aliases
-export const useOrganisationUsers = useUsers;
-export type OrganisationUser = AppUser;

@@ -1,6 +1,8 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -31,6 +33,7 @@ import { MarkAsLostDialog } from "@/components/helpdesk/assets/MarkAsLostDialog"
 import { ReplicateAssetDialog } from "@/components/helpdesk/assets/ReplicateAssetDialog";
 import { DisposeAssetDialog } from "@/components/helpdesk/assets/DisposeAssetDialog";
 import { canCheckIn, canCheckOut } from "@/lib/assetStatusUtils";
+import { invalidateAllAssetQueries } from "@/lib/assetQueryUtils";
 
 const AssetDetail = () => {
   const { assetId } = useParams();
@@ -44,12 +47,13 @@ const AssetDetail = () => {
   const [lostDialogOpen, setLostDialogOpen] = useState(false);
   const [replicateDialogOpen, setReplicateDialogOpen] = useState(false);
   const [disposeDialogOpen, setDisposeDialogOpen] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
   // Fetch asset details with related data including user lookups
   const { data: asset, isLoading } = useQuery({
     queryKey: ["itam-asset-detail", assetId],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from("itam_assets")
         .select(`
           *,
@@ -59,8 +63,27 @@ const AssetDetail = () => {
           make:itam_makes(id, name),
           vendor:itam_vendors(id, name)
         `)
-        .eq("id", assetId)
-        .single();
+        .eq("asset_tag", assetId)
+        .maybeSingle();
+      
+      // Fallback: try querying by id if asset_tag lookup returns null
+      if (!data && !error) {
+        const { data: byId, error: idError } = await supabase
+          .from("itam_assets")
+          .select(`
+            *,
+            category:itam_categories(id, name),
+            department:itam_departments(id, name),
+            location:itam_locations(id, name, site:itam_sites(id, name)),
+            make:itam_makes(id, name),
+            vendor:itam_vendors(id, name)
+          `)
+          .eq("id", assetId)
+          .maybeSingle();
+        if (idError) throw idError;
+        if (!byId) return null;
+        data = byId;
+      }
       if (error) throw error;
       
       // Fetch assigned user separately if assigned_to exists
@@ -98,7 +121,7 @@ const AssetDetail = () => {
       const { data: currentAsset } = await supabase
         .from("itam_assets")
         .select("created_at")
-        .eq("id", assetId)
+        .eq("asset_tag", assetId)
         .single();
       
       if (!currentAsset) return { prev: null, next: null };
@@ -106,7 +129,7 @@ const AssetDetail = () => {
       // Get previous asset (newer than current)
       const { data: prevAsset } = await supabase
         .from("itam_assets")
-        .select("id")
+        .select("asset_tag")
         .eq("is_active", true)
         .gt("created_at", currentAsset.created_at)
         .order("created_at", { ascending: true })
@@ -116,14 +139,14 @@ const AssetDetail = () => {
       // Get next asset (older than current)
       const { data: nextAsset } = await supabase
         .from("itam_assets")
-        .select("id")
+        .select("asset_tag")
         .eq("is_active", true)
         .lt("created_at", currentAsset.created_at)
         .order("created_at", { ascending: false })
         .limit(1)
         .single();
       
-      return { prev: prevAsset?.id || null, next: nextAsset?.id || null };
+      return { prev: prevAsset?.asset_tag || null, next: nextAsset?.asset_tag || null };
     },
     enabled: !!assetId
   });
@@ -149,12 +172,11 @@ const AssetDetail = () => {
       const { error } = await supabase
         .from("itam_assets")
         .update({ status })
-        .eq("id", assetId);
+        .eq("id", asset?.id);
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["itam-asset-detail", assetId] });
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets"] });
+      invalidateAllAssetQueries(queryClient);
       toast.success("Asset status updated successfully");
     },
     onError: (error) => {
@@ -166,14 +188,24 @@ const AssetDetail = () => {
   // Mutation for soft-deleting asset
   const deleteAsset = useMutation({
     mutationFn: async () => {
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
       const { error } = await supabase
         .from("itam_assets")
         .update({ is_active: false })
-        .eq("id", assetId);
+        .eq("id", asset?.id);
       if (error) throw error;
+
+      // Log deletion to history
+      await supabase.from("itam_asset_history").insert({
+        asset_id: asset?.id,
+        action: "deleted",
+        details: { asset_tag: asset?.asset_tag, asset_name: asset?.name },
+        performed_by: currentUser?.id,
+      });
     },
     onSuccess: () => {
       toast.success("Asset deleted successfully");
+      invalidateAllAssetQueries(queryClient);
       navigate("/assets/allassets");
     },
     onError: (error) => {
@@ -184,9 +216,7 @@ const AssetDetail = () => {
 
   // Invalidate queries helper
   const invalidateQueries = () => {
-    queryClient.invalidateQueries({ queryKey: ["itam-asset-detail", assetId] });
-    queryClient.invalidateQueries({ queryKey: ["helpdesk-assets"] });
-    queryClient.invalidateQueries({ queryKey: ["helpdesk-assets-count"] });
+    invalidateAllAssetQueries(queryClient);
   };
 
   // Handle action clicks - using dialogs for proper data capture
@@ -228,41 +258,72 @@ const AssetDetail = () => {
     }
   };
 
+  // Keyboard shortcuts — disabled when any dialog is open
+  const anyDialogOpen = deleteConfirmOpen || imagePreviewOpen || checkOutDialogOpen || checkInDialogOpen || repairDialogOpen || lostDialogOpen || replicateDialogOpen || disposeDialogOpen;
+  useKeyboardShortcuts([
+    { key: "Escape", callback: () => { if (!anyDialogOpen) navigate("/assets/allassets"); } },
+    { key: "ArrowLeft", callback: () => { if (!anyDialogOpen) goToPrev(); } },
+    { key: "ArrowRight", callback: () => { if (!anyDialogOpen) goToNext(); } },
+    { key: "n", ctrl: true, callback: () => { if (!anyDialogOpen) navigate("/assets/add"); } },
+  ]);
+
+  // Currency helper
+  const getCurrencySymbol = () => {
+    const currency = (asset?.custom_fields as Record<string, any>)?.currency || "INR";
+    const symbols: Record<string, string> = { INR: "₹", USD: "$", EUR: "€", GBP: "£" };
+    return symbols[currency] || "₹";
+  };
+
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <p>Loading asset details...</p>
+      <div className="w-full h-full flex flex-col overflow-hidden p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <Skeleton className="h-6 w-48" />
+            <Skeleton className="h-4 w-72" />
+          </div>
+          <div className="flex gap-2">
+            <Skeleton className="h-8 w-20" />
+            <Skeleton className="h-8 w-20" />
+            <Skeleton className="h-8 w-24" />
+          </div>
+        </div>
+        <Skeleton className="h-40 w-full rounded-lg" />
+        <div className="flex gap-2">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-8 w-20" />
+          ))}
+        </div>
+        <Skeleton className="h-64 w-full rounded-lg" />
       </div>
     );
   }
 
   if (!asset) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <p>Asset not found</p>
+      <div className="flex flex-col items-center justify-center py-12 gap-3">
+        <Package className="h-12 w-12 text-muted-foreground" />
+        <h2 className="text-lg font-semibold">Asset not found</h2>
+        <p className="text-sm text-muted-foreground">The asset you're looking for doesn't exist or has been removed.</p>
+        <Button variant="outline" onClick={() => navigate("/assets/allassets")}>Back to Assets</Button>
       </div>
     );
   }
 
   return (
     <div className="w-full h-full flex flex-col overflow-hidden">
-      {/* Breadcrumb Navigation */}
-      <div className="shrink-0 px-4 pt-2 pb-0">
-        <nav className="flex items-center text-xs text-muted-foreground">
-          <span className="hover:text-foreground cursor-pointer" onClick={() => navigate("/assets")}>Assets</span>
-          <span className="mx-1.5">/</span>
-          <span className="hover:text-foreground cursor-pointer" onClick={() => navigate("/assets/allassets")}>All Assets</span>
-          <span className="mx-1.5">/</span>
-          <span className="text-foreground font-medium">{asset.asset_tag || asset.asset_id || 'Detail'}</span>
-        </nav>
-      </div>
 
       {/* Header with Title and Action Buttons - Fixed */}
       <div className="shrink-0 flex items-center justify-between p-4 pb-2">
         <div className="flex items-center gap-2">
           <div>
-            <h1 className="text-lg font-bold">{asset.category?.name || 'Asset'}</h1>
-            <p className="text-xs text-muted-foreground">{asset.asset_id || asset.asset_tag || 'No ID'}</p>
+            <h1 className="text-lg font-bold">{asset.asset_tag || 'Asset'}</h1>
+            <p className="text-xs text-muted-foreground">
+              {asset.category?.name || 'Uncategorized'}
+              {asset.name && asset.name !== asset.category?.name && ` · ${asset.name}`}
+              {asset.department?.name && ` · ${asset.department.name}`}
+              {(asset.location?.site?.name || asset.location?.name) && ` · ${asset.location?.site?.name || asset.location?.name}`}
+            </p>
           </div>
         </div>
         
@@ -278,7 +339,7 @@ const AssetDetail = () => {
           </Button>
 
           {/* Edit Asset Button */}
-          <Button variant="outline" size="sm" onClick={() => navigate(`/assets/add?edit=${assetId}`)} className="gap-1">
+          <Button variant="outline" size="sm" onClick={() => navigate(`/assets/add?edit=${asset.id}`)} className="gap-1">
             <Edit className="h-4 w-4" />
             Edit Asset
           </Button>
@@ -302,13 +363,13 @@ const AssetDetail = () => {
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem onClick={() => handleAction("repair")}>
-                Repair / Maintenance
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleAction("lost")}>
-                Mark as Lost
+                Repair
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => handleAction("dispose")}>
                 Dispose
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleAction("lost")}>
+                Mark as Lost
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => handleAction("delete")} className="text-red-600">
                 Delete
@@ -332,25 +393,14 @@ const AssetDetail = () => {
                   const customFields = asset.custom_fields as Record<string, any> | null;
                   const photoUrl = customFields?.photo_url;
                   
-                  if (photoUrl) {
+                  if (photoUrl && !imageError) {
                     return (
                       <div className="relative w-40 h-28 rounded-lg border bg-muted overflow-hidden group">
                         <img 
                           src={photoUrl} 
                           alt={asset.category?.name || 'Asset'} 
                           className="w-full h-full object-cover"
-                          onError={(e) => {
-                            const target = e.target as HTMLImageElement;
-                            target.style.display = 'none';
-                            target.parentElement!.innerHTML = `
-                              <div class="w-full h-full flex items-center justify-center">
-                                <div class="text-center p-4">
-                                  <svg class="h-10 w-10 mx-auto mb-1 text-muted-foreground" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16.5 9.4 7.55 4.24"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.29 7 12 12 20.71 7"/><line x1="12" x2="12" y1="22" y2="12"/></svg>
-                                  <p class="text-xs text-muted-foreground">Image failed</p>
-                                </div>
-                              </div>
-                            `;
-                          }}
+                          onError={() => setImageError(true)}
                         />
                         {/* Zoom button at bottom right */}
                         <Button
@@ -383,12 +433,12 @@ const AssetDetail = () => {
                   <table className="w-full text-xs">
                     <tbody>
                       <tr className="border-b">
-                        <td className="p-1.5 font-semibold">Asset ID</td>
-                        <td className="p-1.5 font-medium text-primary">{asset.asset_id || '—'}</td>
+                        <td className="p-1.5 font-semibold">Asset Tag</td>
+                        <td className="p-1.5 font-medium text-primary">{asset.asset_tag || '—'}</td>
                       </tr>
                       <tr className="border-b">
-                        <td className="p-1.5 font-semibold">Asset Tag</td>
-                        <td className="p-1.5">{asset.asset_tag || '—'}</td>
+                        <td className="p-1.5 font-semibold">Serial Number</td>
+                        <td className="p-1.5">{asset.serial_number || '—'}</td>
                       </tr>
                       <tr className="border-b">
                         <td className="p-1.5 font-semibold">Purchase Date</td>
@@ -396,7 +446,7 @@ const AssetDetail = () => {
                       </tr>
                       <tr className="border-b">
                         <td className="p-1.5 font-semibold">Purchase Price</td>
-                        <td className="p-1.5 font-semibold">₹{asset.purchase_price?.toLocaleString() || '0.00'}</td>
+                        <td className="p-1.5 font-semibold">{getCurrencySymbol()}{asset.purchase_price?.toLocaleString() || '0.00'}</td>
                       </tr>
                       <tr>
                         <td className="p-1.5 font-semibold">Model</td>

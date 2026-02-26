@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
-import { useOrganisationUsers } from "@/hooks/useUsers";
+import { useUsers } from "@/hooks/useUsers";
 
 interface AssignProblemDialogProps {
   open: boolean;
@@ -20,7 +20,7 @@ export function AssignProblemDialog({ open, onOpenChange, problem }: AssignProbl
   const [assigneeId, setAssigneeId] = useState(problem?.assigned_to ?? "unassigned");
 
   // Use shared hook instead of custom query
-  const { data: users } = useOrganisationUsers();
+  const { data: users } = useUsers();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

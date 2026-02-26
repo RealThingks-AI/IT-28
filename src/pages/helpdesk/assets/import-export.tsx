@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { useAssetExportImport, EXPORT_FIELD_GROUPS, getDefaultSelectedFields } from "@/hooks/useAssetExportImport";
 
-export default function ImportExportPage() {
+export default function ImportExportPage({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate();
   const {
     exportAssets,
@@ -102,22 +102,24 @@ export default function ImportExportPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <AssetModuleTopBar />
+    <div className={embedded ? "" : "min-h-screen bg-background"}>
+      {!embedded && <AssetModuleTopBar />}
 
-      <div className="px-4 py-4 space-y-4">
+      <div className={embedded ? "space-y-4" : "px-4 py-4 space-y-4"}>
         {/* Header */}
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => navigate("/assets/tools")}>
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <div>
-            <h1 className="text-xl font-semibold">Import / Export Assets</h1>
-            <p className="text-sm text-muted-foreground">
-              Bulk import or export your asset data
-            </p>
+        {!embedded && (
+          <div className="flex items-center gap-3">
+          <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <div>
+              <h1 className="text-xl font-semibold">Import / Export Assets</h1>
+              <p className="text-sm text-muted-foreground">
+                Bulk import or export your asset data
+              </p>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
@@ -139,13 +141,15 @@ export default function ImportExportPage() {
           {/* Export Tab */}
           <TabsContent value="export" className="space-y-4 mt-4">
             <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Select Fields to Export</CardTitle>
-                <CardDescription>
-                  Choose which fields to include in your export file. Human-readable names will be used.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
+              {!embedded && (
+                <CardHeader>
+                  <CardTitle className="text-base">Select Fields to Export</CardTitle>
+                  <CardDescription>
+                    Choose which fields to include in your export file. Human-readable names will be used.
+                  </CardDescription>
+                </CardHeader>
+              )}
+              <CardContent className={embedded ? "pt-4 space-y-6" : "space-y-6"}>
                 {Object.entries(EXPORT_FIELD_GROUPS).map(([groupKey, group]) => (
                   <div key={groupKey} className="space-y-3">
                     <div className="flex items-center gap-2">
@@ -207,13 +211,15 @@ export default function ImportExportPage() {
           {/* Import Tab */}
           <TabsContent value="import" className="space-y-4 mt-4">
             <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Import Assets</CardTitle>
-                <CardDescription>
-                  Upload an Excel (.xlsx) or CSV file to import assets. AssetTiger exports are fully supported.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
+              {!embedded && (
+                <CardHeader>
+                  <CardTitle className="text-base">Import Assets</CardTitle>
+                  <CardDescription>
+                    Upload an Excel (.xlsx) or CSV file to import assets. AssetTiger exports are fully supported.
+                  </CardDescription>
+                </CardHeader>
+              )}
+              <CardContent className={embedded ? "pt-4 space-y-4" : "space-y-4"}>
                 {/* Template Download */}
                 <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
                   <FileDown className="h-5 w-5 text-muted-foreground" />
@@ -250,7 +256,7 @@ export default function ImportExportPage() {
                 <Button
                   onClick={handleImport}
                   disabled={!importFile || isImporting}
-                  className="w-full sm:w-auto"
+                  className="w-auto"
                 >
                   {isImporting ? (
                     <>
@@ -330,13 +336,15 @@ export default function ImportExportPage() {
 
             {/* Field Mapping Reference */}
             <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Supported Columns (AssetTiger Compatible)</CardTitle>
-                <CardDescription>
-                  All 28 AssetTiger columns are supported, plus additional fields
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+              {!embedded && (
+                <CardHeader>
+                  <CardTitle className="text-base">Supported Columns (AssetTiger Compatible)</CardTitle>
+                  <CardDescription>
+                    All 28 AssetTiger columns are supported, plus additional fields
+                  </CardDescription>
+                </CardHeader>
+              )}
+              <CardContent className={embedded ? "pt-4" : ""}>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                   {[
                     "Asset Tag ID", "Description", "Category", "Brand", "Model",
@@ -363,16 +371,18 @@ export default function ImportExportPage() {
           {/* Peripherals Tab */}
           <TabsContent value="peripherals" className="space-y-4 mt-4">
             <Card>
-              <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Headphones className="h-5 w-5" />
-                  Import Peripherals (Headphones, Mouse, Keyboard)
-                </CardTitle>
-                <CardDescription>
-                  Upload the peripheral Excel file with columns: Sr No, Name, Email, Headphone Serial, HP Tag, Mouse Serial, Mouse Tag, KB Serial, KB Tag
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
+              {!embedded && (
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Headphones className="h-5 w-5" />
+                    Import Peripherals (Headphones, Mouse, Keyboard)
+                  </CardTitle>
+                  <CardDescription>
+                    Upload the peripheral Excel file with columns: Sr No, Name, Email, Headphone Serial, HP Tag, Mouse Serial, Mouse Tag, KB Serial, KB Tag
+                  </CardDescription>
+                </CardHeader>
+              )}
+              <CardContent className={embedded ? "pt-4 space-y-4" : "space-y-4"}>
                 {/* Format Guide */}
                 <div className="p-3 bg-muted/50 rounded-lg space-y-2">
                   <p className="text-sm font-medium">Expected Excel Format</p>
@@ -409,7 +419,7 @@ export default function ImportExportPage() {
                 <Button
                   onClick={handlePeripheralImport}
                   disabled={!peripheralFile || isImporting}
-                  className="w-full sm:w-auto"
+                  className="w-auto"
                 >
                   {isImporting ? (
                     <>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Dialog,
@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { CalendarIcon, Loader2 } from "lucide-react";
@@ -20,6 +21,9 @@ import { format } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { ASSET_STATUS } from "@/lib/assetStatusUtils";
+import { invalidateAllAssetQueries } from "@/lib/assetQueryUtils";
+import { useUsers } from "@/hooks/useUsers";
+import { getUserDisplayName } from "@/lib/userUtils";
 
 interface RepairAssetDialogProps {
   open: boolean;
@@ -37,18 +41,32 @@ export function RepairAssetDialog({ open, onOpenChange, assetId, assetName, onSu
   const [repairCost, setRepairCost] = useState("");
   const [notes, setNotes] = useState("");
 
+  // Fetch users for assignment dropdown
+  const { data: users = [] } = useUsers();
+
+  // Fetch asset's currency
+  const { data: assetCurrency } = useQuery({
+    queryKey: ["asset-currency", assetId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("itam_assets")
+        .select("custom_fields")
+        .eq("id", assetId)
+        .single();
+      const cf = (data?.custom_fields as Record<string, any>) || {};
+      return cf.currency || "INR";
+    },
+    enabled: open,
+  });
+
+  const currencySymbols: Record<string, string> = { INR: "₹", USD: "$", EUR: "€", GBP: "£" };
+  const currencySymbol = currencySymbols[assetCurrency || "INR"] || "₹";
+
   const repairMutation = useMutation({
     mutationFn: async () => {
       const { data: { user: currentUser } } = await supabase.auth.getUser();
 
-      // Get tenant_id from the asset
-      const { data: assetData } = await supabase
-        .from("itam_assets")
-        .select("tenant_id")
-        .eq("id", assetId)
-        .single();
-
-      // Create repair record in itam_repairs table
+      // Create repair record
       const { error: repairError } = await supabase
         .from("itam_repairs")
         .insert({
@@ -59,7 +77,6 @@ export function RepairAssetDialog({ open, onOpenChange, assetId, assetName, onSu
           started_at: scheduleDate.toISOString(),
           completed_at: completedDate?.toISOString() || null,
           notes: notes || null,
-          tenant_id: assetData?.tenant_id,
         });
       
       if (repairError) throw repairError;
@@ -72,26 +89,26 @@ export function RepairAssetDialog({ open, onOpenChange, assetId, assetName, onSu
       
       if (assetError) throw assetError;
 
+      // Resolve assigned user name for history
+      const selectedUser = users.find(u => u.id === assignedTo);
+      const assignedName = selectedUser ? (getUserDisplayName(selectedUser) || selectedUser.email) : (assignedTo || null);
+
       // Log to history
       await supabase.from("itam_asset_history").insert({
         asset_id: assetId,
         action: "sent_for_repair",
         details: { 
           schedule_date: scheduleDate.toISOString(),
-          assigned_to: assignedTo || null,
+          assigned_to: assignedName,
           estimated_cost: repairCost ? parseFloat(repairCost) : null,
           notes,
         },
         performed_by: currentUser?.id,
-        tenant_id: assetData?.tenant_id,
       });
     },
     onSuccess: () => {
       toast.success("Asset sent for repair/maintenance");
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets"] });
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets-count"] });
-      queryClient.invalidateQueries({ queryKey: ["itam-asset-detail"] });
-      queryClient.invalidateQueries({ queryKey: ["itam-repairs"] });
+      invalidateAllAssetQueries(queryClient);
       onSuccess?.();
       onOpenChange(false);
       // Reset form
@@ -147,13 +164,19 @@ export function RepairAssetDialog({ open, onOpenChange, assetId, assetName, onSu
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="assignedTo">Assigned to</Label>
-            <Input
-              id="assignedTo"
-              value={assignedTo}
-              onChange={(e) => setAssignedTo(e.target.value)}
-              placeholder="Enter technician name..."
-            />
+            <Label>Assigned to</Label>
+            <Select value={assignedTo} onValueChange={setAssignedTo}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select technician..." />
+              </SelectTrigger>
+              <SelectContent>
+                {users.map((user) => (
+                  <SelectItem key={user.id} value={user.id}>
+                    {getUserDisplayName(user) || user.email}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="space-y-2">
@@ -186,13 +209,13 @@ export function RepairAssetDialog({ open, onOpenChange, assetId, assetName, onSu
           <div className="space-y-2">
             <Label htmlFor="repairCost">Repair Cost</Label>
             <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₹</span>
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">{currencySymbol}</span>
               <Input
                 id="repairCost"
                 type="number"
                 value={repairCost}
                 onChange={(e) => setRepairCost(e.target.value)}
-                placeholder="India Rupee"
+                placeholder="0.00"
                 className="pl-7"
               />
             </div>

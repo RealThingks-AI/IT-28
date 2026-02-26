@@ -211,7 +211,7 @@ const AlertsPage = () => {
                             <Button 
                               variant="ghost" 
                               size="sm"
-                              onClick={() => navigate(`/assets/detail/${asset.id}`)}
+                              onClick={() => navigate(`/assets/detail/${asset.asset_tag || asset.id}`)}
                             >
                               <ExternalLink className="h-4 w-4" />
                             </Button>
@@ -298,7 +298,7 @@ const AlertsPage = () => {
                             <Button 
                               variant="ghost" 
                               size="sm"
-                              onClick={() => navigate(`/assets/detail/${assignment.asset_id}`)}
+                              onClick={() => navigate(`/assets/detail/${assignment.asset?.asset_tag || assignment.asset_id}`)}
                             >
                               <ExternalLink className="h-4 w-4" />
                             </Button>

@@ -19,6 +19,7 @@ import { format } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { ASSET_STATUS } from "@/lib/assetStatusUtils";
+import { invalidateAllAssetQueries } from "@/lib/assetQueryUtils";
 
 interface MarkAsLostDialogProps {
   open: boolean;
@@ -30,26 +31,26 @@ interface MarkAsLostDialogProps {
 
 export function MarkAsLostDialog({ open, onOpenChange, assetId, assetName, onSuccess }: MarkAsLostDialogProps) {
   const queryClient = useQueryClient();
-  const [brokenDate, setBrokenDate] = useState<Date>(new Date());
+  const [lostDate, setLostDate] = useState<Date>(new Date());
   const [notes, setNotes] = useState("");
 
-  const markAsBrokenMutation = useMutation({
+  const markAsLostMutation = useMutation({
     mutationFn: async () => {
       const { data: { user: currentUser } } = await supabase.auth.getUser();
 
-      // Get tenant_id from the asset
-      const { data: assetData } = await supabase
-        .from("itam_assets")
-        .select("tenant_id, status")
-        .eq("id", assetId)
-        .single();
+      // Close any open assignments for this asset
+      const now = new Date().toISOString();
+      await supabase
+        .from("itam_asset_assignments")
+        .update({ returned_at: now })
+        .eq("asset_id", assetId)
+        .is("returned_at", null);
 
       // Update asset status to lost
       const { error: assetError } = await supabase
         .from("itam_assets")
         .update({ 
           status: ASSET_STATUS.LOST,
-          // Clear assignment fields since it's lost/broken
           assigned_to: null,
           checked_out_to: null,
           checked_out_at: null,
@@ -63,51 +64,46 @@ export function MarkAsLostDialog({ open, onOpenChange, assetId, assetName, onSuc
       // Log to history
       await supabase.from("itam_asset_history").insert({
         asset_id: assetId,
-        action: "marked_as_broken",
-        old_value: assetData?.status,
+        action: "marked_as_lost",
         new_value: ASSET_STATUS.LOST,
         details: { 
-          broken_date: brokenDate.toISOString(),
+          lost_date: lostDate.toISOString(),
           notes,
         },
         performed_by: currentUser?.id,
-        tenant_id: assetData?.tenant_id,
       });
     },
     onSuccess: () => {
-      toast.success("Asset marked as broken");
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets"] });
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets-count"] });
-      queryClient.invalidateQueries({ queryKey: ["itam-asset-detail"] });
+      toast.success("Asset marked as lost");
+      invalidateAllAssetQueries(queryClient);
       onSuccess?.();
       onOpenChange(false);
-      // Reset form
-      setBrokenDate(new Date());
+      setLostDate(new Date());
       setNotes("");
     },
     onError: (error) => {
-      toast.error("Failed to mark asset as broken");
+      toast.error("Failed to mark asset as lost");
       console.error(error);
     },
   });
 
   const handleSubmit = () => {
-    markAsBrokenMutation.mutate();
+    markAsLostMutation.mutate();
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>Broken Asset</DialogTitle>
+          <DialogTitle>Mark as Lost</DialogTitle>
           <DialogDescription>
-            Mark "{assetName}" as broken or lost.
+            Mark "{assetName}" as lost.
           </DialogDescription>
         </DialogHeader>
         
         <div className="grid gap-4 py-4">
           <div className="space-y-2">
-            <Label>Date Broken <span className="text-destructive">*</span></Label>
+            <Label>Date Lost <span className="text-destructive">*</span></Label>
             <Popover>
               <PopoverTrigger asChild>
                 <Button
@@ -115,14 +111,14 @@ export function MarkAsLostDialog({ open, onOpenChange, assetId, assetName, onSuc
                   className={cn("w-full justify-start text-left font-normal")}
                 >
                   <CalendarIcon className="mr-2 h-4 w-4" />
-                  {format(brokenDate, "dd/MM/yyyy")}
+                  {format(lostDate, "dd/MM/yyyy")}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
                 <Calendar
                   mode="single"
-                  selected={brokenDate}
-                  onSelect={(date) => date && setBrokenDate(date)}
+                  selected={lostDate}
+                  onSelect={(date) => date && setLostDate(date)}
                   initialFocus
                   className="pointer-events-auto"
                 />
@@ -145,10 +141,10 @@ export function MarkAsLostDialog({ open, onOpenChange, assetId, assetName, onSuc
         <DialogFooter className="flex-row-reverse sm:flex-row-reverse gap-2">
           <Button 
             onClick={handleSubmit} 
-            disabled={markAsBrokenMutation.isPending}
+            disabled={markAsLostMutation.isPending}
           >
-            {markAsBrokenMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Broken
+            {markAsLostMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Mark as Lost
           </Button>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel

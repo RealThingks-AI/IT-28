@@ -24,6 +24,7 @@ import {
   AlertTriangle
 } from "lucide-react";
 import { ASSET_STATUS, canCheckIn, canCheckOut } from "@/lib/assetStatusUtils";
+import { invalidateAllAssetQueries } from "@/lib/assetQueryUtils";
 import { CheckOutDialog } from "./CheckOutDialog";
 import { CheckInDialog } from "./CheckInDialog";
 import { RepairAssetDialog } from "./RepairAssetDialog";
@@ -57,9 +58,7 @@ export function AssetActionsMenu({ asset, onActionComplete }: AssetActionsMenuPr
   const [disposeDialogOpen, setDisposeDialogOpen] = useState(false);
 
   const invalidateQueries = () => {
-    queryClient.invalidateQueries({ queryKey: ["helpdesk-assets"] });
-    queryClient.invalidateQueries({ queryKey: ["helpdesk-assets-count"] });
-    queryClient.invalidateQueries({ queryKey: ["itam-asset-detail"] });
+    invalidateAllAssetQueries(queryClient);
     onActionComplete?.();
   };
 
@@ -115,17 +114,49 @@ export function AssetActionsMenu({ asset, onActionComplete }: AssetActionsMenuPr
     },
   });
 
-  // Delete (soft delete) mutation
+  // Delete (soft delete) mutation with undo and history logging
   const deleteAsset = useMutation({
     mutationFn: async () => {
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
       const { error } = await supabase
         .from("itam_assets")
         .update({ is_active: false })
         .eq("id", asset.id);
       if (error) throw error;
+
+      // Log deletion to history
+      await supabase.from("itam_asset_history").insert({
+        asset_id: asset.id,
+        action: "deleted",
+        details: { asset_tag: asset.asset_tag, asset_name: asset.name },
+        performed_by: currentUser?.id,
+      });
     },
     onSuccess: () => {
-      toast.success("Asset deleted successfully");
+      toast.success(`Asset "${asset.asset_tag || asset.name || 'Asset'}" deleted`, {
+        action: {
+          label: "Undo",
+          onClick: async () => {
+            const { error } = await supabase
+              .from("itam_assets")
+              .update({ is_active: true })
+              .eq("id", asset.id);
+            if (!error) {
+              // Log restoration to history
+              const { data: { user: currentUser } } = await supabase.auth.getUser();
+              await supabase.from("itam_asset_history").insert({
+                asset_id: asset.id,
+                action: "restored",
+                details: { asset_tag: asset.asset_tag, asset_name: asset.name },
+                performed_by: currentUser?.id,
+              });
+              toast.success("Delete undone");
+              invalidateQueries();
+            }
+          },
+        },
+        duration: 5000,
+      });
       invalidateQueries();
     },
     onError: (error) => {
@@ -134,48 +165,6 @@ export function AssetActionsMenu({ asset, onActionComplete }: AssetActionsMenuPr
     },
   });
 
-  // Replicate mutation
-  const replicateAsset = useMutation({
-    mutationFn: async () => {
-      // Fetch current asset data
-      const { data: assetData, error: fetchError } = await supabase
-        .from("itam_assets")
-        .select("*")
-        .eq("id", asset.id)
-        .single();
-      if (fetchError) throw fetchError;
-
-      // Remove fields that should be unique
-      const { id, created_at, updated_at, asset_id: originalAssetId, asset_tag, ...assetToCopy } = assetData;
-
-      // Create new asset
-      const { data, error } = await supabase
-        .from("itam_assets")
-        .insert({
-          ...assetToCopy,
-          name: `${assetToCopy.name || 'Asset'} (Copy)`,
-          asset_id: `${originalAssetId}-COPY-${Date.now()}`,
-          asset_tag: asset_tag ? `${asset_tag}-COPY` : null,
-          status: ASSET_STATUS.AVAILABLE,
-          assigned_to: null,
-          checked_out_at: null,
-          checked_out_to: null,
-        })
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
-    },
-    onSuccess: (data) => {
-      toast.success("Asset replicated successfully");
-      invalidateQueries();
-      navigate(`/assets/detail/${data.id}`);
-    },
-    onError: (error) => {
-      toast.error("Failed to replicate asset");
-      console.error(error);
-    },
-  });
 
   const handleCheckIn = () => {
     setCheckInDialogOpen(true);
@@ -201,7 +190,7 @@ export function AssetActionsMenu({ asset, onActionComplete }: AssetActionsMenuPr
     setReplicateDialogOpen(true);
   };
 
-  const isLoading = updateStatus.isPending || deleteAsset.isPending || replicateAsset.isPending;
+  const isLoading = updateStatus.isPending || deleteAsset.isPending;
 
   return (
     <>
@@ -227,11 +216,7 @@ export function AssetActionsMenu({ asset, onActionComplete }: AssetActionsMenuPr
           )}
           <DropdownMenuItem onClick={handleMaintenance}>
             <Wrench className="h-4 w-4 mr-2" />
-            Repair / Maintenance
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={handleLost}>
-            <MapPin className="h-4 w-4 mr-2" />
-            Mark as Lost
+            Repair
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={handleDispose}>

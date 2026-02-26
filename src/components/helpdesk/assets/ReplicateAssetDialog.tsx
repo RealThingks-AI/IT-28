@@ -17,6 +17,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { ASSET_STATUS } from "@/lib/assetStatusUtils";
+import { invalidateAllAssetQueries } from "@/lib/assetQueryUtils";
 
 interface ReplicateAssetDialogProps {
   open: boolean;
@@ -78,8 +79,7 @@ export function ReplicateAssetDialog({ open, onOpenChange, assetId, assetName, o
     onSuccess: (data) => {
       const count = data.length;
       toast.success(`${count} asset${count > 1 ? 's' : ''} created successfully`);
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets"] });
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets-count"] });
+      invalidateAllAssetQueries(queryClient);
       onSuccess?.();
       onOpenChange(false);
       // Reset form
@@ -87,7 +87,7 @@ export function ReplicateAssetDialog({ open, onOpenChange, assetId, assetName, o
       setCopyCount(2);
       // Navigate to first created asset
       if (data.length > 0) {
-        navigate(`/assets/detail/${data[0].id}`);
+        navigate(`/assets/detail/${data[0].asset_tag || data[0].id}`);
       }
     },
     onError: (error) => {

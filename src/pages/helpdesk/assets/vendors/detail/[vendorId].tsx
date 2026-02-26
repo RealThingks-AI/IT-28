@@ -171,7 +171,7 @@ const VendorDetail = () => {
 
           <TabsContent value="assets" className="space-y-2">
             {assets.map((asset) => (
-              <Card key={asset.id} className="cursor-pointer hover:bg-accent" onClick={() => navigate(`/assets/detail/${asset.id}`)}>
+              <Card key={asset.id} className="cursor-pointer hover:bg-accent" onClick={() => navigate(`/assets/detail/${asset.asset_tag || asset.id}`)}>
                 <CardContent className="p-3">
                   <div className="flex justify-between items-center text-sm">
                     <div>

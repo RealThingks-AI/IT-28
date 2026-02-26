@@ -6,7 +6,7 @@ import { useITAMStats } from "@/hooks/useITAMStats";
 import { useSubscriptionStats } from "@/hooks/useSubscriptionStats";
 import { useUpdateStats } from "@/hooks/useUpdateManager";
 import { useUsers } from "@/hooks/useUsers";
-import { NotificationPanel } from "@/components/NotificationPanel";
+import { HeaderUserSection } from "@/components/HeaderUserSection";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -14,18 +14,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useSessionStore } from "@/stores/useSessionStore";
 import {
   Ticket, Package, CreditCard, RefreshCw, Shield, LucideIcon,
-  ChevronRight, ChevronDown, Plus, PackagePlus, BarChart3, Calendar,
-  User, Settings, LogOut,
+  ChevronRight, Plus, PackagePlus, BarChart3, Calendar,
 } from "lucide-react";
-import { Separator } from "@/components/ui/separator";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import appLogo from "@/assets/app-logo.png";
 
 interface ModuleCard {
@@ -42,12 +32,11 @@ interface ModuleCard {
 }
 
 export default function ModuleLauncher() {
-  const { user, loading, signOut } = useAuth();
-  const { isAdmin } = useUserRole();
+  const { user, loading } = useAuth();
   const navigate = useNavigate();
+  const { isAdmin } = useUserRole();
   const storeName = useSessionStore(s => s.name);
   const userName = storeName || user?.user_metadata?.name || "there";
-  const userEmail = user?.email || "";
 
   const { data: ticketStats } = useHelpdeskStats();
   const { data: assetStats } = useITAMStats();
@@ -77,8 +66,8 @@ export default function ModuleLauncher() {
       url: "/tickets",
       color: "bg-blue-500/10 text-blue-600",
       borderColor: "border-t-blue-500",
-      stat: ticketStats ? `${ticketStats.open} open` : undefined,
-      badge: ticketStats ? `${ticketStats.slaCompliance}% SLA` : undefined,
+      stat: ticketStats ? `${ticketStats.open ?? 0} open` : undefined,
+      badge: ticketStats ? `${ticketStats.slaCompliance ?? 100}% SLA` : undefined,
     },
     {
       id: "assets",
@@ -129,7 +118,7 @@ export default function ModuleLauncher() {
     { label: "Reports", icon: BarChart3, url: "/tickets/reports" },
   ];
 
-  const visibleModules = modules.filter(m => !m.adminOnly);
+  const visibleModules = modules.filter(m => !m.adminOnly || isAdmin);
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -140,61 +129,7 @@ export default function ModuleLauncher() {
             <img src={appLogo} alt="RT-IT-Hub" className="w-8 h-8" />
             <span className="text-base font-semibold text-primary">RT-IT-Hub</span>
           </div>
-          <div className="flex items-center gap-1">
-            {isAdmin && (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5 rounded-full text-xs h-8 border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700"
-                  onClick={() => navigate("/admin/users")}
-                >
-                  <Shield className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Admin Panel</span>
-                </Button>
-                <Separator orientation="vertical" className="h-5 mx-1" />
-              </>
-            )}
-            <NotificationPanel />
-            <Separator orientation="vertical" className="h-5 mx-1" />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="gap-2 px-2">
-                  <Avatar className="h-8 w-8 border-2 border-primary/30 ring-1 ring-primary/10">
-                    <AvatarFallback className="bg-primary/10 text-primary font-semibold text-[11px]">
-                      {initials}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="hidden sm:inline text-sm font-semibold text-foreground truncate max-w-[120px]">
-                    {userName}
-                  </span>
-                  {/* ChevronDown removed */}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel className="font-normal">
-                  <div className="flex flex-col gap-1">
-                    <p className="text-sm font-medium text-foreground">{userName}</p>
-                    
-                  </div>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => navigate("/profile")}>
-                  <User className="mr-2 h-4 w-4" />
-                  Profile
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate("/account")}>
-                  <Settings className="mr-2 h-4 w-4" />
-                  Account Settings
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => signOut()} className="text-destructive focus:text-destructive">
-                  <LogOut className="mr-2 h-4 w-4" />
-                  Sign Out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          <HeaderUserSection />
         </div>
       </header>
 

@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.restore-backup]
 verify_jwt = false
+
+[functions.deduplicate-asset-photos]
+verify_jwt = false

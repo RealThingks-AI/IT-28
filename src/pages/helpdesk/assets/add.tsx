@@ -19,20 +19,13 @@ import { format, addMonths } from "date-fns";
 import { CalendarIcon } from "lucide-react";
 import { AssetPhotoSelector } from "@/components/helpdesk/assets/AssetPhotoSelector";
 import { QuickAddFieldDialog, FieldType } from "@/components/helpdesk/assets/QuickAddFieldDialog";
+import { invalidateAllAssetQueries } from "@/lib/assetQueryUtils";
 
-const currencies = [{
-  code: "INR",
-  name: "India Rupee",
-  symbol: "₹"
-}, {
-  code: "USD",
-  name: "US Dollar",
-  symbol: "$"
-}, {
-  code: "EUR",
-  name: "Euro",
-  symbol: "€"
-}];
+const fallbackCurrencies = [
+  { code: "INR", name: "India Rupee", symbol: "₹" },
+  { code: "USD", name: "US Dollar", symbol: "$" },
+  { code: "EUR", name: "Euro", symbol: "€" },
+];
 
 import { ASSET_STATUS_OPTIONS } from "@/lib/assetStatusUtils";
 
@@ -54,6 +47,22 @@ export default function AddAsset() {
     isLoading: configLoading
   } = useAssetSetupConfig();
 
+  // Fetch currencies from DB
+  const { data: currencies } = useQuery({
+    queryKey: ["currencies-active"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("currencies")
+        .select("code, name, symbol")
+        .eq("is_active", true)
+        .order("code");
+      return data && data.length > 0 ? data : fallbackCurrencies;
+    },
+    staleTime: 60000,
+  });
+
+  const currencyList = currencies || fallbackCurrencies;
+
   // Fetch vendors for the dropdown
   const { data: vendors = [] } = useQuery({
     queryKey: ["itam-vendors"],
@@ -72,11 +81,11 @@ export default function AddAsset() {
   const [formData, setFormData] = useState({
     asset_tag: "",
     serial_number: "",
-    make_id: "",
+    make_id: undefined as string | undefined,
     model: "",
     purchase_date: null as Date | null,
     purchased_from: "",
-    vendor_id: "",
+    vendor_id: undefined as string | undefined,
     cost: "",
     currency: "INR",
     description: "",
@@ -84,10 +93,10 @@ export default function AddAsset() {
     classification_confidential: false,
     classification_internal: false,
     classification_public: false,
-    site_id: "",
-    location_id: "",
-    category_id: "",
-    department_id: "",
+    site_id: undefined as string | undefined,
+    location_id: undefined as string | undefined,
+    category_id: undefined as string | undefined,
+    department_id: undefined as string | undefined,
     photo_url: null as string | null,
     status: "available",
     // Warranty fields
@@ -277,13 +286,6 @@ export default function AddAsset() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("tenant_id")
-        .eq("id", user.id)
-        .maybeSingle();
-      const tenantId = profileData?.tenant_id || 1;
-
       const classifications: string[] = [];
       if (formData.classification_confidential) classifications.push("confidential");
       if (formData.classification_internal) classifications.push("internal");
@@ -315,7 +317,6 @@ export default function AddAsset() {
         serial_number: formData.serial_number || null,
         purchase_price: formData.cost ? parseFloat(formData.cost) : null,
         notes: formData.description || null,
-        tenant_id: tenantId,
         is_active: true,
         purchase_date: formData.purchase_date ? format(formData.purchase_date, "yyyy-MM-dd") : null,
         warranty_expiry: formData.warranty_expiry ? format(formData.warranty_expiry, "yyyy-MM-dd") : null,
@@ -355,7 +356,6 @@ export default function AddAsset() {
               status: "available",
             },
             performed_by: user.id,
-            tenant_id: tenantId,
           } as any);
         }
       } catch (logErr) {
@@ -364,8 +364,7 @@ export default function AddAsset() {
     },
     onSuccess: () => {
       toast.success("Asset created successfully");
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets"] });
-      queryClient.invalidateQueries({ queryKey: ["assets-overview"] });
+      invalidateAllAssetQueries(queryClient);
       navigate("/assets/allassets");
     },
     onError: (error: Error) => {
@@ -419,6 +418,7 @@ export default function AddAsset() {
         purchase_date: formData.purchase_date ? format(formData.purchase_date, "yyyy-MM-dd") : null,
         warranty_expiry: formData.warranty_expiry ? format(formData.warranty_expiry, "yyyy-MM-dd") : null,
         custom_fields: {
+          ...((currentAsset?.custom_fields as Record<string, any>) || {}),
           asset_configuration: formData.asset_configuration,
           classification: classifications,
           currency: formData.currency,
@@ -459,7 +459,7 @@ export default function AddAsset() {
                 new_value: newVal || null,
                 details: { field, old: oldVal || null, new: newVal || null },
                 performed_by: authUser.id,
-                tenant_id: currentAsset.tenant_id,
+                
               });
             }
           }
@@ -473,19 +473,18 @@ export default function AddAsset() {
     },
     onSuccess: () => {
       toast.success("Asset updated successfully");
-      queryClient.invalidateQueries({ queryKey: ["helpdesk-assets"] });
-      queryClient.invalidateQueries({ queryKey: ["assets-overview"] });
-      queryClient.invalidateQueries({ queryKey: ["itam-asset-detail", editAssetId] });
+      invalidateAllAssetQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: ["itam-asset-edit", editAssetId] });
-      navigate(`/assets/detail/${editAssetId}`);
+      // Navigate using asset_tag for clean URL
+      const assetTag = formData.asset_tag;
+      navigate(`/assets/detail/${assetTag || editAssetId}`);
     },
     onError: (error: Error) => {
       toast.error("Failed to update asset: " + error.message);
     }
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = () => {
     const errors = validateForm();
     if (errors.length > 0) {
       setValidationErrors(errors);
@@ -503,7 +502,7 @@ export default function AddAsset() {
 
   const handleCancel = () => {
     if (isEditMode && editAssetId) {
-      navigate(`/assets/detail/${editAssetId}`);
+      navigate(`/assets/detail/${formData.asset_tag || editAssetId}`);
     } else {
       navigate("/assets/allassets");
     }
@@ -547,8 +546,8 @@ export default function AddAsset() {
   }
 
   return (
-    <div className="p-4 space-y-4 overflow-hidden">
-      <form onSubmit={handleSubmit} className="space-y-4">
+    <div className="p-4 space-y-4 overflow-auto h-full">
+      <div className="space-y-4">
         {/* Asset Details */}
         <Card>
           <CardHeader className="bg-muted/50 py-2.5">
@@ -564,7 +563,7 @@ export default function AddAsset() {
                   Category <span className="text-destructive">*</span>
                 </Label>
                 <div className="flex gap-1.5">
-                  <Select value={formData.category_id} onValueChange={value => setFormData({ ...formData, category_id: value })}>
+                  <Select value={formData.category_id || undefined} onValueChange={value => setFormData({ ...formData, category_id: value })}>
                     <SelectTrigger className="flex-1 h-8 text-sm">
                       <SelectValue placeholder="Select category" />
                     </SelectTrigger>
@@ -642,7 +641,7 @@ export default function AddAsset() {
                   Make <span className="text-destructive">*</span>
                 </Label>
                 <div className="flex gap-1.5">
-                  <Select value={formData.make_id} onValueChange={value => setFormData({ ...formData, make_id: value })}>
+                  <Select value={formData.make_id || undefined} onValueChange={value => setFormData({ ...formData, make_id: value })}>
                     <SelectTrigger className="flex-1 h-8 text-sm">
                       <SelectValue placeholder="Select make" />
                     </SelectTrigger>
@@ -732,7 +731,7 @@ export default function AddAsset() {
                   Vendor
                 </Label>
                 <div className="flex gap-1.5">
-                  <Select value={formData.vendor_id} onValueChange={value => setFormData({ ...formData, vendor_id: value, purchased_from: "" })}>
+                  <Select value={formData.vendor_id || undefined} onValueChange={value => setFormData({ ...formData, vendor_id: value, purchased_from: "" })}>
                     <SelectTrigger className="flex-1 h-8 text-sm">
                       <SelectValue placeholder="Select vendor" />
                     </SelectTrigger>
@@ -762,7 +761,7 @@ export default function AddAsset() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {currencies.map(curr => (
+                      {currencyList.map(curr => (
                         <SelectItem key={curr.code} value={curr.code}>
                           {curr.symbol} {curr.code}
                         </SelectItem>
@@ -806,7 +805,7 @@ export default function AddAsset() {
                   Site <span className="text-destructive">*</span>
                 </Label>
                 <div className="flex gap-1.5">
-                  <Select value={formData.site_id} onValueChange={value => setFormData({ ...formData, site_id: value })}>
+                  <Select value={formData.site_id || undefined} onValueChange={value => setFormData({ ...formData, site_id: value })}>
                     <SelectTrigger className="flex-1 h-8 text-sm">
                       <SelectValue placeholder="Select site" />
                     </SelectTrigger>
@@ -837,7 +836,7 @@ export default function AddAsset() {
                   Location <span className="text-destructive">*</span>
                 </Label>
                 <div className="flex gap-1.5">
-                  <Select value={formData.location_id} onValueChange={value => setFormData({ ...formData, location_id: value })}>
+                  <Select value={formData.location_id || undefined} onValueChange={value => setFormData({ ...formData, location_id: value })}>
                     <SelectTrigger className="flex-1 h-8 text-sm">
                       <SelectValue placeholder="Select location" />
                     </SelectTrigger>
@@ -866,7 +865,7 @@ export default function AddAsset() {
               <div className="space-y-1.5">
                 <Label className="text-xs">Department</Label>
                 <div className="flex gap-1.5">
-                  <Select value={formData.department_id} onValueChange={value => setFormData({ ...formData, department_id: value })}>
+                  <Select value={formData.department_id || undefined} onValueChange={value => setFormData({ ...formData, department_id: value })}>
                     <SelectTrigger className="flex-1 h-8 text-sm">
                       <SelectValue placeholder="Select department" />
                     </SelectTrigger>
@@ -909,7 +908,7 @@ export default function AddAsset() {
           <Button type="button" variant="outline" size="sm" onClick={handleCancel} className="min-w-[80px]">
             Cancel
           </Button>
-          <Button type="submit" size="sm" disabled={isPending} className="min-w-[80px] bg-primary hover:bg-primary/90 text-primary-foreground">
+          <Button type="button" size="sm" disabled={isPending} onClick={handleSubmit} className="min-w-[80px] bg-primary hover:bg-primary/90 text-primary-foreground">
             {isPending ? (
               <>
                 <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
@@ -918,7 +917,7 @@ export default function AddAsset() {
             ) : isEditMode ? "Save Changes" : "Submit"}
           </Button>
         </div>
-      </form>
+      </div>
 
       {/* Quick Add Dialog */}
       <QuickAddFieldDialog

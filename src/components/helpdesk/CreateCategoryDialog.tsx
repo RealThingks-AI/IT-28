@@ -44,25 +44,6 @@ export const CreateCategoryDialog = ({
   const queryClient = useQueryClient();
   const { user } = useAuth();
 
-  // Get current user's tenant_id
-  const { data: userProfile } = useQuery({
-    queryKey: ["user-profile-tenant", user?.id],
-    queryFn: async () => {
-      if (!user) return null;
-
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("tenant_id")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      return {
-        tenant_id: profileData?.tenant_id || 1,
-      };
-    },
-    enabled: !!user,
-  });
-
   const form = useForm<z.infer<typeof categorySchema>>({
     resolver: zodResolver(categorySchema),
     defaultValues: {
@@ -89,9 +70,6 @@ export const CreateCategoryDialog = ({
         if (error) throw error;
         return data;
       } else {
-        // Default tenant_id to 1
-        const tenantId = userProfile?.tenant_id || 1;
-
         // Check if category with same name already exists
         const { data: existing } = await supabase
           .from("helpdesk_categories")
@@ -108,7 +86,6 @@ export const CreateCategoryDialog = ({
           name: values.name,
           description: values.description || null,
           is_active: true,
-          tenant_id: tenantId,
         };
 
         const { data, error } = await supabase

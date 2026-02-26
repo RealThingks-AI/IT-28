@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Link2, Plus, Trash2, ExternalLink, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import { sanitizeSearchInput } from "@/lib/utils";
 
 interface LinkingTabProps {
   assetId: string;
@@ -76,7 +77,7 @@ export const LinkingTab = ({ assetId }: LinkingTabProps) => {
         .select("id, asset_id, asset_tag, category:itam_categories(name)")
         .neq("id", assetId)
         .eq("is_active", true)
-        .or(`asset_id.ilike.%${searchQuery}%,asset_tag.ilike.%${searchQuery}%`)
+        .or(`asset_id.ilike.%${sanitizeSearchInput(searchQuery)}%,asset_tag.ilike.%${sanitizeSearchInput(searchQuery)}%`)
         .limit(10);
       
       if (error) throw error;
@@ -200,7 +201,7 @@ export const LinkingTab = ({ assetId }: LinkingTabProps) => {
                         <div className="flex items-center gap-2">
                           <span 
                             className="font-medium text-primary hover:underline cursor-pointer text-sm truncate"
-                            onClick={() => navigate(`/assets/detail/${linkedAsset.id}`)}
+                            onClick={() => navigate(`/assets/detail/${linkedAsset.asset_tag || linkedAsset.id}`)}
                           >
                             {linkedAsset.asset_id || linkedAsset.asset_tag}
                           </span>
@@ -219,7 +220,7 @@ export const LinkingTab = ({ assetId }: LinkingTabProps) => {
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7"
-                        onClick={() => navigate(`/assets/detail/${linkedAsset.id}`)}
+                        onClick={() => navigate(`/assets/detail/${linkedAsset.asset_tag || linkedAsset.id}`)}
                       >
                         <ExternalLink className="h-3.5 w-3.5" />
                       </Button>
