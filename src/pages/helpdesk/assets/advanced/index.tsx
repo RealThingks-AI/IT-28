@@ -28,6 +28,7 @@ import { EmailsTab } from "@/components/helpdesk/assets/setup/EmailsTab";
 import { EmployeeAssetsDialog } from "@/components/helpdesk/assets/EmployeeAssetsDialog";
 import { useUsers, AppUser } from "@/hooks/useUsers";
 import AssetReports from "@/pages/helpdesk/assets/reports";
+import AssetLogsPage from "@/pages/helpdesk/assets/AssetLogsPage";
 
 import LicensesIndex from "@/pages/helpdesk/assets/licenses/index";
 import DepreciationDashboard from "@/pages/helpdesk/assets/depreciation/index";
@@ -308,6 +309,7 @@ const SETUP_TABS = [
   { id: "departments", label: "Departments" },
   { id: "makes", label: "Makes" },
   { id: "emails", label: "Emails" },
+  { id: "vendors", label: "Vendors" },
 ] as const;
 
 type SetupTabId = typeof SETUP_TABS[number]["id"];
@@ -381,7 +383,7 @@ const exportCSV = (rows: Record<string, string | number>[], filename: string) =>
   toast.success(`Exported ${rows.length} records`);
 };
 
-const VALID_TABS = ["employees", "vendors", "licenses", "repairs", "warranties", "depreciation", "documents", "import-export", "reports", "setup"] as const;
+const VALID_TABS = ["employees", "licenses", "repairs", "warranties", "depreciation", "documents", "import-export", "reports", "logs", "setup"] as const;
 
 export default function AdvancedPage() {
   const navigate = useNavigate();
@@ -1220,6 +1222,135 @@ export default function AdvancedPage() {
     );
   };
 
+  const renderVendorsSetupContent = () => (
+    <Card>
+      <CardContent className="pt-4 space-y-4">
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-sm font-medium text-muted-foreground">Manage vendors</span>
+          <div className="ml-auto flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => exportCSV(filteredVendors.map(v => ({ 
+              Name: v.name, 
+              Contact: v.contact_name || "", 
+              Email: v.contact_email || "", 
+              Phone: v.contact_phone || "", 
+              Website: v.website || "",
+              "Asset Count": vendorAssetCounts[v.id] || 0,
+            })), "vendors")}>
+              <FileDown className="h-4 w-4 mr-1" />
+              Export
+            </Button>
+            <Button size="sm" onClick={() => navigate("/assets/vendors/add-vendor")}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Vendor
+            </Button>
+          </div>
+        </div>
+        <div className="relative max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input placeholder="Search vendors..." value={vendorSearch} onChange={(e) => setVendorSearch(e.target.value)} className="pl-9 h-8" />
+        </div>
+        <Table>
+          <TableHeader className="bg-muted/50">
+            <TableRow>
+              <SortableTableHeader column="name" label="Vendor Name" sortConfig={vendorSort} onSort={handleVendorSort} />
+              <SortableTableHeader column="contact_name" label="Contact Person" sortConfig={vendorSort} onSort={handleVendorSort} />
+              <SortableTableHeader column="contact_email" label="Email" sortConfig={vendorSort} onSort={handleVendorSort} />
+              <TableHead className="font-medium text-xs uppercase text-muted-foreground">Phone</TableHead>
+              <TableHead className="font-medium text-xs uppercase text-muted-foreground">Website</TableHead>
+              <TableHead className="font-medium text-xs uppercase text-muted-foreground">Assets</TableHead>
+              <TableHead className="font-medium text-xs uppercase text-muted-foreground w-[80px]">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loadingVendors ? (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center py-12">
+                  <div className="flex flex-col items-center justify-center">
+                    <Loader2 className="h-6 w-6 text-muted-foreground animate-spin mb-2" />
+                    <p className="text-sm text-muted-foreground">Loading vendors...</p>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : paginatedVendors.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center py-12">
+                  <div className="flex flex-col items-center justify-center">
+                    <Building2 className="h-8 w-8 text-muted-foreground mb-2 opacity-50" />
+                    <p className="text-sm text-muted-foreground">No vendors found</p>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : (
+              paginatedVendors.map((vendor) => (
+                <TableRow key={vendor.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => navigate(`/assets/vendors/detail/${vendor.id}`)}>
+                  <TableCell className="font-medium">
+                    <div className="flex items-center gap-2">
+                      <Building2 className="h-4 w-4 text-muted-foreground" />
+                      {vendor.name}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-sm">{vendor.contact_name || "—"}</TableCell>
+                  <TableCell className="text-sm">
+                    {vendor.contact_email ? (
+                      <div className="flex items-center gap-1.5">
+                        <Mail className="h-3.5 w-3.5 text-muted-foreground" />
+                        {vendor.contact_email}
+                      </div>
+                    ) : "—"}
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    {vendor.contact_phone ? (
+                      <div className="flex items-center gap-1.5">
+                        <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                        {vendor.contact_phone}
+                      </div>
+                    ) : "—"}
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    {vendor.website ? (
+                      <a href={vendor.website} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-primary hover:underline" onClick={(e) => e.stopPropagation()}>
+                        <Globe className="h-3.5 w-3.5" />
+                        Visit
+                      </a>
+                    ) : "—"}
+                  </TableCell>
+                  <TableCell className="text-sm font-medium">
+                    <div className="flex items-center gap-1.5">
+                      <Package className="h-3.5 w-3.5 text-muted-foreground" />
+                      {vendorAssetCounts[vendor.id] || 0}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                        <Button variant="ghost" size="icon" className="h-7 w-7">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-48">
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); navigate(`/assets/vendors/detail/${vendor.id}`); }}>
+                          <Eye className="h-4 w-4 mr-2" />
+                          View Details
+                        </DropdownMenuItem>
+                        {vendor.contact_email && (
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); window.open(`mailto:${vendor.contact_email}`, '_blank'); }}>
+                            <Send className="h-4 w-4 mr-2" />
+                            Email Vendor
+                          </DropdownMenuItem>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+        <PaginationControls currentPage={vendorPage} totalPages={vendorTotalPages} totalItems={filteredVendors.length} itemsPerPage={ITEMS_PER_PAGE} onPageChange={setVendorPage} />
+      </CardContent>
+    </Card>
+  );
+
   const renderSetupContent = () => {
     const type = getSetupType();
     const items = getSetupItems();
@@ -1228,6 +1359,7 @@ export default function AdvancedPage() {
     if (setupSubTab === "sites") return renderSitesLocationsTable();
     if (setupSubTab === "categories") return renderCategoriesTable();
     if (setupSubTab === "emails") return <EmailsTab />;
+    if (setupSubTab === "vendors") return renderVendorsSetupContent();
 
     return (
       <Card>
@@ -1255,7 +1387,6 @@ export default function AdvancedPage() {
           <div className="relative">
             <TabsList className="h-9 bg-muted rounded-lg p-1 w-full justify-start gap-1 overflow-x-auto overflow-y-hidden scrollbar-none">
               <TabsTrigger value="employees" className="text-xs">Employees</TabsTrigger>
-              <TabsTrigger value="vendors" className="text-xs">Vendors</TabsTrigger>
               <TabsTrigger value="licenses" className="text-xs">Licenses</TabsTrigger>
               <TabsTrigger value="repairs" className="text-xs">Repairs</TabsTrigger>
               <TabsTrigger value="warranties" className="text-xs">Warranties</TabsTrigger>
@@ -1263,6 +1394,7 @@ export default function AdvancedPage() {
               <TabsTrigger value="documents" className="text-xs">Documents</TabsTrigger>
               <TabsTrigger value="import-export" className="text-xs">Import/Export</TabsTrigger>
               <TabsTrigger value="reports" className="text-xs">Reports</TabsTrigger>
+              <TabsTrigger value="logs" className="text-xs">Logs</TabsTrigger>
               <TabsTrigger value="setup" className="text-xs">Setup</TabsTrigger>
             </TabsList>
             {/* Fade gradient for scroll indicator */}
@@ -1280,6 +1412,7 @@ export default function AdvancedPage() {
                 categories: categories.length,
                 departments: departments.length,
                 makes: makes.length,
+                vendors: vendors.length,
               };
               const count = countMap[tab.id];
               return (
@@ -1471,139 +1604,9 @@ export default function AdvancedPage() {
             </Card>
           </TabsContent>
 
-          {/* Vendors Tab */}
-          <TabsContent value="vendors" className="mt-0 space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <StatCard icon={Building2} value={vendors.length} label="Total Vendors" colorClass="bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" />
-              <StatCard icon={Mail} value={vendors.filter(v => v.contact_email).length} label="With Contact" colorClass="bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" />
-              <StatCard icon={Globe} value={vendors.filter(v => v.website).length} label="With Website" colorClass="bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400" />
-            </div>
-            <Card>
-              <CardContent className="pt-4 space-y-4">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <div className="relative max-w-sm flex-1 min-w-[200px]">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input placeholder="Search vendors..." value={vendorSearch} onChange={(e) => setVendorSearch(e.target.value)} className="pl-9 h-8" />
-                  </div>
-                  <div className="ml-auto flex gap-2">
-                    <Button size="sm" variant="outline" onClick={() => exportCSV(filteredVendors.map(v => ({ 
-                      Name: v.name, 
-                      Contact: v.contact_name || "", 
-                      Email: v.contact_email || "", 
-                      Phone: v.contact_phone || "", 
-                      Website: v.website || "",
-                      "Asset Count": vendorAssetCounts[v.id] || 0,
-                    })), "vendors")}>
-                      <FileDown className="h-4 w-4 mr-1" />
-                      Export
-                    </Button>
-                    <Button size="sm" onClick={() => navigate("/assets/vendors/add-vendor")}>
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Vendor
-                    </Button>
-                  </div>
-                </div>
-
-                  <Table>
-                    <TableHeader className="bg-muted/50">
-                      <TableRow>
-                        <SortableTableHeader column="name" label="Vendor Name" sortConfig={vendorSort} onSort={handleVendorSort} />
-                        <SortableTableHeader column="contact_name" label="Contact Person" sortConfig={vendorSort} onSort={handleVendorSort} />
-                        <SortableTableHeader column="contact_email" label="Email" sortConfig={vendorSort} onSort={handleVendorSort} />
-                        <TableHead className="font-medium text-xs uppercase text-muted-foreground">Phone</TableHead>
-                        <TableHead className="font-medium text-xs uppercase text-muted-foreground">Website</TableHead>
-                        <TableHead className="font-medium text-xs uppercase text-muted-foreground">Assets</TableHead>
-                        <TableHead className="font-medium text-xs uppercase text-muted-foreground w-[80px]">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {loadingVendors ? (
-                        <TableRow>
-                          <TableCell colSpan={7} className="text-center py-12">
-                            <div className="flex flex-col items-center justify-center">
-                              <Loader2 className="h-6 w-6 text-muted-foreground animate-spin mb-2" />
-                              <p className="text-sm text-muted-foreground">Loading vendors...</p>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ) : paginatedVendors.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={7} className="text-center py-12">
-                            <div className="flex flex-col items-center justify-center">
-                              <Building2 className="h-8 w-8 text-muted-foreground mb-2 opacity-50" />
-                              <p className="text-sm text-muted-foreground">No vendors found</p>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        paginatedVendors.map((vendor) => (
-                          <TableRow key={vendor.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => navigate(`/assets/vendors/detail/${vendor.id}`)}>
-                            <TableCell className="font-medium">
-                              <div className="flex items-center gap-2">
-                                <Building2 className="h-4 w-4 text-muted-foreground" />
-                                {vendor.name}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-sm">{vendor.contact_name || "—"}</TableCell>
-                            <TableCell className="text-sm">
-                              {vendor.contact_email ? (
-                                <div className="flex items-center gap-1.5">
-                                  <Mail className="h-3.5 w-3.5 text-muted-foreground" />
-                                  {vendor.contact_email}
-                                </div>
-                              ) : "—"}
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              {vendor.contact_phone ? (
-                                <div className="flex items-center gap-1.5">
-                                  <Phone className="h-3.5 w-3.5 text-muted-foreground" />
-                                  {vendor.contact_phone}
-                                </div>
-                              ) : "—"}
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              {vendor.website ? (
-                                <a href={vendor.website} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-primary hover:underline" onClick={(e) => e.stopPropagation()}>
-                                  <Globe className="h-3.5 w-3.5" />
-                                  Visit
-                                </a>
-                              ) : "—"}
-                            </TableCell>
-                            <TableCell className="text-sm font-medium">
-                              <div className="flex items-center gap-1.5">
-                                <Package className="h-3.5 w-3.5 text-muted-foreground" />
-                                {vendorAssetCounts[vendor.id] || 0}
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                                  <Button variant="ghost" size="icon" className="h-7 w-7">
-                                    <MoreHorizontal className="h-4 w-4" />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end" className="w-48">
-                                  <DropdownMenuItem onClick={(e) => { e.stopPropagation(); navigate(`/assets/vendors/detail/${vendor.id}`); }}>
-                                    <Eye className="h-4 w-4 mr-2" />
-                                    View Details
-                                  </DropdownMenuItem>
-                                  {vendor.contact_email && (
-                                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); window.open(`mailto:${vendor.contact_email}`, '_blank'); }}>
-                                      <Send className="h-4 w-4 mr-2" />
-                                      Email Vendor
-                                    </DropdownMenuItem>
-                                  )}
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                <PaginationControls currentPage={vendorPage} totalPages={vendorTotalPages} totalItems={filteredVendors.length} itemsPerPage={ITEMS_PER_PAGE} onPageChange={setVendorPage} />
-              </CardContent>
-            </Card>
+          {/* Logs Tab */}
+          <TabsContent value="logs" className="mt-0">
+            <AssetLogsPage />
           </TabsContent>
 
           {/* Licenses Tab */}
