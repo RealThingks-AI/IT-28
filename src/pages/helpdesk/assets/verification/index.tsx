@@ -229,16 +229,13 @@ export default function AssetVerification() {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input placeholder="Search assets..." value={search} onChange={e => setSearch(e.target.value)} className="pl-8 h-8 text-sm" />
           </div>
-          <Select value={filter} onValueChange={v => setFilter(v as StatusFilter)}>
-            <SelectTrigger className="w-[140px] h-8 text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="confirmed">Confirmed</SelectItem>
-              <SelectItem value="denied">Denied</SelectItem>
-              <SelectItem value="overdue">Overdue</SelectItem>
-              <SelectItem value="pending">Pending</SelectItem>
-            </SelectContent>
-          </Select>
+          <ToggleGroup type="single" value={filter} onValueChange={v => { if (v) setFilter(v as StatusFilter); }} variant="outline" size="sm">
+            <ToggleGroupItem value="all" className="text-xs h-8 px-3">All</ToggleGroupItem>
+            <ToggleGroupItem value="confirmed" className="text-xs h-8 px-3">Confirmed</ToggleGroupItem>
+            <ToggleGroupItem value="denied" className="text-xs h-8 px-3">Denied</ToggleGroupItem>
+            <ToggleGroupItem value="overdue" className="text-xs h-8 px-3">Overdue</ToggleGroupItem>
+            <ToggleGroupItem value="pending" className="text-xs h-8 px-3">Pending</ToggleGroupItem>
+          </ToggleGroup>
           {selected.length > 0 && (
             <>
               <Button size="sm" variant="outline" onClick={handleBulkVerifyStock} disabled={bulkLoading}>
