@@ -161,6 +161,7 @@ function replacePlaceholders(text: string, variables: Record<string, string>): s
 }
 
 function buildAssetTableHtml(assets: AssetRow[]): string {
+  const hasActions = assets.some(a => a.confirm_url || a.deny_url);
   const thStyle = `padding:8px 10px;text-align:left;font-size:12px;font-weight:600;color:#374151;border-bottom:2px solid #d1d5db;`;
 
   const headerRow = `<tr style="background:#f3f4f6;">
@@ -170,7 +171,7 @@ function buildAssetTableHtml(assets: AssetRow[]): string {
     <th style="${thStyle}">Model</th>
     <th style="${thStyle}">Serial No</th>
     <th style="${thStyle}text-align:center;">Photo</th>
-    <th style="${thStyle}text-align:center;">Action</th>
+    ${hasActions ? `<th style="${thStyle}text-align:center;">Action</th>` : ""}
   </tr>`;
 
   const bodyRows = assets.map((a, i) => {
@@ -180,12 +181,16 @@ function buildAssetTableHtml(assets: AssetRow[]): string {
       ? `<img src="${a.photo_url}" alt="Asset" style="width:40px;height:40px;object-fit:cover;border-radius:4px;border:1px solid #d1d5db;" />`
       : `<span style="color:#9ca3af;font-size:11px;">—</span>`;
 
-    const confirmBtn = a.confirm_url
-      ? `<a href="${a.confirm_url}" style="display:inline-block;padding:4px 10px;background:#16a34a;color:#fff;font-size:11px;font-weight:600;text-decoration:none;border-radius:4px;margin:2px;">&#10003;</a>`
-      : "";
-    const denyBtn = a.deny_url
-      ? `<a href="${a.deny_url}" style="display:inline-block;padding:4px 10px;background:#dc2626;color:#fff;font-size:11px;font-weight:600;text-decoration:none;border-radius:4px;margin:2px;">&#10007;</a>`
-      : "";
+    let actionCell = "";
+    if (hasActions) {
+      const confirmBtn = a.confirm_url
+        ? `<a href="${a.confirm_url}" style="display:inline-block;padding:4px 10px;background:#16a34a;color:#fff;font-size:11px;font-weight:600;text-decoration:none;border-radius:4px;margin:2px;">&#10003;</a>`
+        : "";
+      const denyBtn = a.deny_url
+        ? `<a href="${a.deny_url}" style="display:inline-block;padding:4px 10px;background:#dc2626;color:#fff;font-size:11px;font-weight:600;text-decoration:none;border-radius:4px;margin:2px;">&#10007;</a>`
+        : "";
+      actionCell = `<td style="${tdStyle}text-align:center;white-space:nowrap;">${confirmBtn}${denyBtn}</td>`;
+    }
 
     return `<tr>
       <td style="${tdStyle}"><strong>${a.asset_tag || "N/A"}</strong></td>
@@ -194,7 +199,7 @@ function buildAssetTableHtml(assets: AssetRow[]): string {
       <td style="${tdStyle}">${a.model || "N/A"}</td>
       <td style="${tdStyle}">${a.serial_number || "N/A"}</td>
       <td style="${tdStyle}text-align:center;">${photoCell}</td>
-      <td style="${tdStyle}text-align:center;white-space:nowrap;">${confirmBtn}${denyBtn}</td>
+      ${actionCell}
     </tr>`;
   }).join("");
 

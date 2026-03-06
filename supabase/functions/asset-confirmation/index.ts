@@ -32,6 +32,7 @@ function buildResponsePage(title: string, message: string, success: boolean): st
     .icon { width: 56px; height: 56px; border-radius: 50%; background: ${bgColor}; color: ${color}; font-size: 24px; line-height: 56px; margin: 0 auto 20px; font-weight: bold; }
     h1 { color: ${color}; font-size: 20px; margin-bottom: 12px; font-weight: 600; }
     p { color: #4b5563; font-size: 14px; line-height: 1.6; }
+    .close-hint { margin-top: 20px; padding: 12px; background: #f9fafb; border-radius: 8px; font-size: 12px; color: #6b7280; }
     .footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #9ca3af; }
   </style>
 </head>
@@ -40,6 +41,7 @@ function buildResponsePage(title: string, message: string, success: boolean): st
     <div class="icon">${icon}</div>
     <h1>${title}</h1>
     <p>${message}</p>
+    <div class="close-hint">&#10003; Your response has been recorded. You can safely close this tab.</div>
     <div class="footer">RT-IT-Hub Asset Management</div>
   </div>
 </body>
