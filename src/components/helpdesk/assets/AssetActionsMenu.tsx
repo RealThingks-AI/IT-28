@@ -276,13 +276,13 @@ export function AssetActionsMenu({ asset, onActionComplete }: AssetActionsMenuPr
                 // Send email
                 await supabase.functions.invoke("send-asset-email", {
                   body: {
-                    to: userData.email,
-                    userName: userData.name || userData.email,
-                    template: "asset_confirmation",
-                    data: {
-                      confirmationId: confirmation.id,
+                    templateId: "asset_confirmation",
+                    recipientEmail: userData.email,
+                    assetId: asset.id,
+                    variables: {
+                      user_name: userData.name || userData.email,
                       token,
-                      assets: [{ asset_tag: asset.asset_tag || asset.asset_id, name: asset.name }],
+                      asset_count: "1",
                     },
                   },
                 });
