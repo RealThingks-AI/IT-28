@@ -595,9 +595,8 @@ export function AssetsList({
       case "verified": {
         const confirmStatus = asset.confirmation_status;
         const lastConfirmed = asset.last_confirmed_at;
-        const isAssigned = !!asset.assigned_to;
         const now = new Date();
-        const isOverdue = isAssigned && (!lastConfirmed || differenceInDays(now, new Date(lastConfirmed)) > 60);
+        const isOverdue = !lastConfirmed || differenceInDays(now, new Date(lastConfirmed)) > 60;
 
         let icon, label, color;
         if (confirmStatus === "confirmed" && !isOverdue) {

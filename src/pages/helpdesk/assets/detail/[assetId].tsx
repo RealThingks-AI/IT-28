@@ -390,6 +390,35 @@ const AssetDetail = () => {
                   Send Confirmation
                 </DropdownMenuItem>
               )}
+              {asset.status === "available" && !asset.assigned_to && (
+                <DropdownMenuItem onClick={async () => {
+                  try {
+                    const { error } = await supabase
+                      .from("itam_assets")
+                      .update({
+                        confirmation_status: "confirmed",
+                        last_confirmed_at: new Date().toISOString(),
+                      } as any)
+                      .eq("id", asset.id);
+                    if (error) throw error;
+                    const { data: { user } } = await supabase.auth.getUser();
+                    await supabase.from("itam_asset_history").insert({
+                      asset_id: asset.id,
+                      action: "stock_verified",
+                      details: { verified_by: user?.id, method: "admin_manual" },
+                      performed_by: user?.id,
+                    });
+                    toast.success("Asset verified as in stock");
+                    invalidateQueries();
+                  } catch (err) {
+                    console.error(err);
+                    toast.error("Failed to verify stock");
+                  }
+                }}>
+                  <ShieldCheck className="h-4 w-4 mr-2" />
+                  Verify Stock
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

@@ -81,6 +81,7 @@ const AllocateLicense = lazy(() => import("./pages/helpdesk/assets/licenses/allo
 const CreateRepair = lazy(() => import("./pages/helpdesk/assets/repairs/create"));
 const RepairDetail = lazy(() => import("./pages/helpdesk/assets/repairs/detail/[repairId]"));
 
+const AssetVerification = lazy(() => import("./pages/helpdesk/assets/verification/index"));
 const AssetLogs = lazy(() => import("./pages/helpdesk/assets/AssetLogsPage"));
 const AssetsBulkActions = lazy(() => import("./pages/helpdesk/assets/explore/bulk-actions"));
 const AssetsImportExport = lazy(() => import("./pages/helpdesk/assets/import-export"));
@@ -201,6 +202,7 @@ const App = () => {
                     <Route path="/assets/reserve" element={<AssetReserve />} />
                     <Route path="/assets/alerts" element={<AssetAlerts />} />
                     <Route path="/assets/advanced" element={<AssetAdvancedPage />} />
+                    <Route path="/assets/verification" element={<AssetVerification />} />
                     <Route path="/assets/employees" element={<AssetEmployeesPage />} />
                     <Route path="/assets/detail/:assetId" element={<AssetDetail />} />
                     <Route path="/assets/reports" element={<AssetReports />} />

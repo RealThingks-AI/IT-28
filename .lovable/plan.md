@@ -1,50 +1,38 @@
 
 
-# Add Confirmation Status to List View, Asset Detail & Email Actions
+# Add "Verification" Section to Assets Sidebar
 
-## Current State
-- Dashboard has stat cards for "Pending Confirm" and "Denied" that link to `/assets/allassets?confirmation=overdue` and `?confirmation=denied` — but the list view does NOT consume these URL params
-- `AssetsList.tsx` does NOT query `confirmation_status` or `last_confirmed_at`
-- Asset detail page has no confirmation status indicator or "Send Confirmation Email" action
-- `AssetActionsMenu.tsx` has "Email to User" (mailto) but no "Send Confirmation" action
-- `EmployeeAssetsDialog.tsx` already has full confirmation flow with per-item confirm/deny URLs
+## Overview
+Add a new "Verification" sidebar item (with children) between "Check In" and "Employees" in the Assets module. This will provide a dedicated section for the verification workflow with sub-pages for an overview/dashboard, overdue assets, denied assets, and sending bulk confirmations.
 
 ## Changes
 
-### 1. `src/pages/helpdesk/assets/allassets.tsx` — Add confirmation filter
-- Read `confirmation` from `searchParams` and pass it in `filters`
-- Add a "Confirmation" dropdown filter: All / Confirmed / Denied / Pending / Overdue
-- Show it alongside existing Status and Type filters
+### 1. `src/layouts/AssetsLayout.tsx`
+- Add a new sidebar item with `title: "Verification"` and `icon: ShieldCheck` between "Check In" and "Employees"
+- Give it children:
+  - **Overview** → `/assets/verification` — main verification dashboard page
+  - **Overdue** → `/assets/allassets?confirmation=overdue` — links to filtered all-assets list
+  - **Denied** → `/assets/allassets?confirmation=denied` — links to filtered all-assets list
 
-### 2. `src/components/helpdesk/assets/AssetsList.tsx` — Add "Verified" column + filter logic
-- Add `confirmation_status, last_confirmed_at` to the select query
-- Add a new column after "Status": **Verified** — showing:
-  - Green checkmark (confirmed)
-  - Red X (denied)  
-  - Amber clock (overdue — not confirmed in 60+ days)
-  - Gray dash (never confirmed / not assigned)
-- Add tooltip on hover with date/status details
-- Implement `confirmation` filter logic in the query:
-  - `confirmed` → `confirmation_status = "confirmed"`
-  - `denied` → `confirmation_status = "denied"`
-  - `pending` → `confirmation_status = "pending"`
-  - `overdue` → assigned assets where `last_confirmed_at` is null or > 60 days (client-side filter since it's a computed condition)
+### 2. New page: `src/pages/helpdesk/assets/verification/index.tsx`
+- Dedicated verification overview page showing:
+  - Summary stat cards: Total assets, Confirmed, Denied, Pending, Overdue (60-day cycle)
+  - Table of all assets grouped by verification status with quick actions
+  - "Bulk Verify Stock" button for available assets (no assigned user)
+  - "Bulk Send Confirmation" button for assigned assets
+  - Each row shows asset tag, name, status, assigned user, last confirmed date, and action buttons (Verify Stock / Send Confirmation / View Details)
+- Queries `itam_assets` with `confirmation_status` and `last_confirmed_at`
 
-### 3. `src/pages/helpdesk/assets/detail/[assetId].tsx` — Add confirmation status + email action
-- Show confirmation status badge in the right info table (after Status row): "Confirmed", "Denied", "Pending", or "Not verified"
-- Add "Send Confirmation Email" to the "More Actions" dropdown (only when asset is assigned)
-- Reuse the same confirmation flow from `EmployeeAssetsDialog` (create `itam_asset_confirmations` record, create items, invoke `send-asset-email`)
+### 3. `src/App.tsx`
+- Add route: `<Route path="/assets/verification" element={<AssetVerification />} />`
+- Add lazy import for the new verification page
 
-### 4. `src/components/helpdesk/assets/AssetActionsMenu.tsx` — Add "Send Confirmation" action
-- Add a "Send Confirmation" menu item (with ShieldCheck icon) — visible when `asset.assigned_to` exists
-- On click, invoke the same edge function flow: create confirmation record + items + send email
-- Requires fetching the assigned user's email first
-
-### 5. `src/components/helpdesk/assets/AssetColumnSettings.tsx` — Register "Verified" column
-- Add `{ id: "verified", label: "Verified", visible: true, order_index: 8 }` to `SYSTEM_COLUMN_ORDER`
+### 4. `src/components/ModuleSidebar.tsx`
+- No changes needed — already supports `children` in `SidebarItem` interface
 
 ## Technical Notes
-- The 60-day overdue calculation is client-side (computed from `last_confirmed_at`)
-- For the "overdue" filter in list view, we fetch all assigned assets and filter client-side since "overdue" is a computed condition, not a DB column value
-- Confirmation email reuses existing `send-asset-email` edge function with `asset_confirmation` template
-- No new DB tables or migrations needed
+- The "Overdue" and "Denied" children link to existing `/assets/allassets` with query params, reusing existing filter logic
+- The new verification overview page reuses existing Supabase queries and mutation patterns from `AssetActionsMenu` and `EmployeeAssetsDialog`
+- Bulk verify stock reuses the same `itam_assets` update + `itam_asset_history` insert pattern
+- Bulk send confirmation reuses the `itam_asset_confirmations` + `send-asset-email` edge function pattern
+
