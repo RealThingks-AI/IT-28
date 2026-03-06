@@ -194,9 +194,22 @@ export default function AssetVerification() {
         status: "pending",
         sent_by: user?.id,
       } as any);
-      await supabase.functions.invoke("send-asset-email", {
-        body: { assetId: asset.id, userId: asset.assigned_to, token, type: "confirmation" },
-      });
+      // Look up recipient email
+      const { data: recipientUser } = await supabase.from("users").select("email, name").eq("id", asset.assigned_to).maybeSingle();
+      if (recipientUser?.email) {
+        await supabase.functions.invoke("send-asset-email", {
+          body: {
+            templateId: "asset_confirmation",
+            recipientEmail: recipientUser.email,
+            assetId: asset.id,
+            variables: {
+              user_name: recipientUser.name || recipientUser.email,
+              token,
+              asset_count: "1",
+            },
+          },
+        });
+      }
       toast.success("Confirmation sent");
       invalidateAll();
     } catch { toast.error("Failed to send"); }
