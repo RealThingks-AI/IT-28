@@ -128,31 +128,77 @@ export default function AssetVerification() {
     setBulkLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      for (const asset of assigned) {
-        const token = crypto.randomUUID();
-        await supabase.from("itam_asset_confirmations").insert({
-          asset_id: asset.id,
-          user_id: asset.assigned_to,
-          token,
-          status: "pending",
-          sent_by: user?.id,
-        } as any);
-        // Look up recipient email
-        const { data: recipientUser } = await supabase.from("users").select("email, name").eq("id", asset.assigned_to).maybeSingle();
-        if (recipientUser?.email) {
-          await supabase.functions.invoke("send-asset-email", {
-            body: {
-              templateId: "asset_confirmation",
-              recipientEmail: recipientUser.email,
-              assetId: asset.id,
-              variables: {
-                user_name: recipientUser.name || recipientUser.email,
-                token,
-                asset_count: "1",
-              },
+      const { data: currentUser } = await supabase.from("users").select("id").eq("auth_user_id", user?.id).single();
+
+      // Group assets by assigned_to user
+      const byUser: Record<string, typeof assigned> = {};
+      assigned.forEach(a => {
+        if (!byUser[a.assigned_to]) byUser[a.assigned_to] = [];
+        byUser[a.assigned_to].push(a);
+      });
+
+      const supabaseUrl = `https://${import.meta.env.VITE_SUPABASE_PROJECT_ID}.supabase.co`;
+
+      for (const [userId, userAssets] of Object.entries(byUser)) {
+        const { data: recipientUser } = await supabase.from("users").select("email, name").eq("id", userId).maybeSingle();
+        if (!recipientUser?.email) continue;
+
+        // Create confirmation record
+        const { data: confirmation, error: confErr } = await supabase
+          .from("itam_asset_confirmations")
+          .insert({
+            user_id: userId,
+            requested_by: currentUser?.id || null,
+          })
+          .select("id, token")
+          .single();
+        if (confErr) throw confErr;
+
+        // Create confirmation items
+        const items = userAssets.map(a => ({
+          confirmation_id: confirmation.id,
+          asset_id: a.id,
+          asset_tag: a.asset_tag || a.asset_id || null,
+          asset_name: a.name || null,
+        }));
+        const { data: insertedItems, error: itemsErr } = await supabase
+          .from("itam_asset_confirmation_items")
+          .insert(items)
+          .select("id, asset_id");
+        if (itemsErr) throw itemsErr;
+
+        const itemIdMap = new Map((insertedItems || []).map((it: any) => [it.asset_id, it.id]));
+
+        const confirmAllUrl = `${supabaseUrl}/functions/v1/asset-confirmation?action=confirm_all&token=${confirmation.token}`;
+        const denyAllUrl = `${supabaseUrl}/functions/v1/asset-confirmation?action=deny_all&token=${confirmation.token}`;
+
+        const emailAssets = userAssets.map(a => {
+          const itemId = itemIdMap.get(a.id);
+          return {
+            asset_tag: a.asset_tag || a.asset_id || "N/A",
+            description: (a.category as any)?.name || a.name || "N/A",
+            brand: "N/A",
+            model: "N/A",
+            serial_number: null,
+            photo_url: null,
+            confirm_url: itemId ? `${supabaseUrl}/functions/v1/asset-confirmation?action=confirm_item&token=${confirmation.token}&item_id=${itemId}` : undefined,
+            deny_url: itemId ? `${supabaseUrl}/functions/v1/asset-confirmation?action=deny_item&token=${confirmation.token}&item_id=${itemId}` : undefined,
+          };
+        });
+
+        await supabase.functions.invoke("send-asset-email", {
+          body: {
+            templateId: "asset_confirmation",
+            recipientEmail: recipientUser.email,
+            assets: emailAssets,
+            variables: {
+              user_name: recipientUser.name || recipientUser.email,
+              asset_count: String(userAssets.length),
+              confirm_all_url: confirmAllUrl,
+              deny_all_url: denyAllUrl,
             },
-          });
-        }
+          },
+        });
       }
       toast.success(`Confirmation sent for ${assigned.length} asset(s)`);
       setSelected([]);
@@ -186,30 +232,62 @@ export default function AssetVerification() {
   const handleSendSingle = async (asset: any) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      const token = crypto.randomUUID();
-      await supabase.from("itam_asset_confirmations").insert({
-        asset_id: asset.id,
-        user_id: asset.assigned_to,
-        token,
-        status: "pending",
-        sent_by: user?.id,
-      } as any);
-      // Look up recipient email
+      const { data: currentUser } = await supabase.from("users").select("id").eq("auth_user_id", user?.id).single();
       const { data: recipientUser } = await supabase.from("users").select("email, name").eq("id", asset.assigned_to).maybeSingle();
-      if (recipientUser?.email) {
-        await supabase.functions.invoke("send-asset-email", {
-          body: {
-            templateId: "asset_confirmation",
-            recipientEmail: recipientUser.email,
-            assetId: asset.id,
-            variables: {
-              user_name: recipientUser.name || recipientUser.email,
-              token,
-              asset_count: "1",
-            },
+      if (!recipientUser?.email) { toast.error("No email found for assigned user"); return; }
+
+      // Create confirmation record
+      const { data: confirmation, error: confErr } = await supabase
+        .from("itam_asset_confirmations")
+        .insert({
+          user_id: asset.assigned_to,
+          requested_by: currentUser?.id || null,
+        })
+        .select("id, token")
+        .single();
+      if (confErr) throw confErr;
+
+      // Create confirmation item
+      const { data: insertedItems, error: itemsErr } = await supabase
+        .from("itam_asset_confirmation_items")
+        .insert([{
+          confirmation_id: confirmation.id,
+          asset_id: asset.id,
+          asset_tag: asset.asset_tag || asset.asset_id || null,
+          asset_name: asset.name || null,
+        }])
+        .select("id, asset_id");
+      if (itemsErr) throw itemsErr;
+
+      const itemId = insertedItems?.[0]?.id;
+      const supabaseUrl = `https://${import.meta.env.VITE_SUPABASE_PROJECT_ID}.supabase.co`;
+      const confirmAllUrl = `${supabaseUrl}/functions/v1/asset-confirmation?action=confirm_all&token=${confirmation.token}`;
+      const denyAllUrl = `${supabaseUrl}/functions/v1/asset-confirmation?action=deny_all&token=${confirmation.token}`;
+
+      const emailAssets = [{
+        asset_tag: asset.asset_tag || asset.asset_id || "N/A",
+        description: (asset.category as any)?.name || asset.name || "N/A",
+        brand: "N/A",
+        model: "N/A",
+        serial_number: null,
+        photo_url: null,
+        confirm_url: itemId ? `${supabaseUrl}/functions/v1/asset-confirmation?action=confirm_item&token=${confirmation.token}&item_id=${itemId}` : undefined,
+        deny_url: itemId ? `${supabaseUrl}/functions/v1/asset-confirmation?action=deny_item&token=${confirmation.token}&item_id=${itemId}` : undefined,
+      }];
+
+      await supabase.functions.invoke("send-asset-email", {
+        body: {
+          templateId: "asset_confirmation",
+          recipientEmail: recipientUser.email,
+          assets: emailAssets,
+          variables: {
+            user_name: recipientUser.name || recipientUser.email,
+            asset_count: "1",
+            confirm_all_url: confirmAllUrl,
+            deny_all_url: denyAllUrl,
           },
-        });
-      }
+        },
+      });
       toast.success("Confirmation sent");
       invalidateAll();
     } catch { toast.error("Failed to send"); }
