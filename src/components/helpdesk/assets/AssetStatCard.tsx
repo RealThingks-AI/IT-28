@@ -1,6 +1,22 @@
 import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+const BORDER_COLOR_MAP: Record<string, string> = {
+  "bg-blue-500": "#3b82f6",
+  "bg-green-500": "#22c55e",
+  "bg-purple-500": "#a855f7",
+  "bg-orange-500": "#f97316",
+  "bg-cyan-500": "#06b6d4",
+  "bg-yellow-500": "#eab308",
+  "bg-gray-500": "#6b7280",
+  "bg-red-500": "#ef4444",
+  "bg-indigo-500": "#6366f1",
+  "bg-amber-500": "#f59e0b",
+  "bg-rose-500": "#f43f5e",
+  "bg-emerald-500": "#10b981",
+};
 
 interface AssetStatCardProps {
   title: string;
@@ -11,6 +27,7 @@ interface AssetStatCardProps {
   iconColor: string;
   onClick?: () => void;
   animationDelay?: number;
+  loading?: boolean;
 }
 
 export function AssetStatCard({
@@ -22,40 +39,59 @@ export function AssetStatCard({
   iconColor,
   onClick,
   animationDelay = 0,
+  loading,
 }: AssetStatCardProps) {
+  const borderColor = BORDER_COLOR_MAP[iconBgColor] || "hsl(var(--border))";
+
+  if (loading) {
+    return (
+      <Card className="min-h-[72px] border-l-[3px]" style={{ borderLeftColor: "hsl(var(--border))" }}>
+        <div className="px-3 py-2.5 flex items-center gap-2.5">
+          <Skeleton className="w-9 h-9 rounded-lg shrink-0" />
+          <div className="flex-1 space-y-1.5">
+            <Skeleton className="h-3 w-16" />
+            <Skeleton className="h-4 w-10" />
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
   return (
     <Card
       className={cn(
-        "group relative overflow-hidden transition-all duration-200 border",
-        "animate-fade-in hover:shadow-lg hover:-translate-y-0.5",
-        onClick && "cursor-pointer hover:border-primary/30 active:scale-[0.98]"
+        "group relative overflow-hidden transition-all duration-200 ease-out border-l-[3px] min-h-[72px]",
+        "animate-fade-in hover:-translate-y-0.5 hover:shadow-md",
+        onClick && "cursor-pointer hover:border-primary/20 active:scale-[0.98]"
       )}
-      style={{ animationDelay: `${animationDelay}ms`, animationFillMode: "backwards" }}
+      style={{
+        animationDelay: `${animationDelay}ms`,
+        animationDuration: "350ms",
+        animationFillMode: "backwards",
+        borderLeftColor: borderColor,
+      }}
       onClick={onClick}
     >
-      <div className="p-4">
-        <div className="flex items-start gap-3">
-          {/* Colored Icon Square */}
+      <div className="px-3 py-2.5">
+        <div className="flex items-center gap-2.5">
           <div
             className={cn(
-              "flex-shrink-0 w-12 h-12 rounded-lg flex items-center justify-center shadow-sm",
-              "transition-all duration-200 group-hover:shadow-md group-hover:scale-105 group-hover:-translate-y-0.5",
+              "flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center",
+              "transition-transform duration-200 group-hover:scale-105",
               iconBgColor
             )}
           >
-            <Icon className={cn("w-6 h-6", iconColor)} />
+            <Icon className={cn("w-4 h-4", iconColor)} />
           </div>
-
-          {/* Stats Content */}
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-muted-foreground truncate">
+            <p className="text-[11px] font-medium text-muted-foreground truncate leading-none">
               {title}
             </p>
-            <h3 className="text-2xl font-bold text-foreground mt-0.5 tabular-nums">
+            <h3 className="font-bold text-lg text-foreground mt-0.5 tabular-nums truncate leading-tight">
               {value}
             </h3>
             {subtitle && (
-              <p className="text-xs text-muted-foreground mt-0.5 truncate">
+              <p className="text-[10px] text-muted-foreground/80 mt-px truncate leading-none">
                 {subtitle}
               </p>
             )}

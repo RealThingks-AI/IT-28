@@ -1,8 +1,7 @@
-import { useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { useSessionStore } from "@/stores/useSessionStore";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useNavigate } from "react-router-dom";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { LogOut, User, ChevronUp } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,89 +9,75 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { ChevronUp, LogOut, User } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface SidebarUserSectionProps {
-  collapsed: boolean;
+  collapsed?: boolean;
 }
 
-export function SidebarUserSection({ collapsed }: SidebarUserSectionProps) {
+export function SidebarUserSection({ collapsed = false }: SidebarUserSectionProps) {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
-  const { pathname } = useLocation();
-  const [open, setOpen] = useState(false);
+  const { data: currentUser } = useCurrentUser();
 
-  // Read from session store — no DB query
-  const storeName = useSessionStore((s) => s.name);
-  const userName = storeName || user?.user_metadata?.name || user?.email?.split("@")[0] || "User";
+  if (!user) return null;
 
-  const getInitials = (name: string) => {
-    return name
-      .split(" ")
-      .map((n) => n.charAt(0))
-      .join("")
-      .toUpperCase()
-      .slice(0, 2);
-  };
+  const displayName =
+    currentUser?.name || user.user_metadata?.full_name || user.email?.split("@")[0] || "User";
+  const initials = displayName
+    .split(" ")
+    .map((n: string) => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+  const avatarUrl = user.user_metadata?.avatar_url;
 
-  const handleSignOut = async () => {
-    setOpen(false);
-    await signOut();
-  };
+  const trigger = (
+    <button
+      className={cn(
+        "flex items-center gap-2 w-full rounded-lg px-2 py-2 text-left hover:bg-accent transition-colors",
+        collapsed && "justify-center"
+      )}
+    >
+      <Avatar className="h-7 w-7 shrink-0">
+        <AvatarImage src={avatarUrl} />
+        <AvatarFallback className="text-[10px] bg-primary/10 text-primary font-medium">
+          {initials}
+        </AvatarFallback>
+      </Avatar>
+      {!collapsed && (
+        <>
+          <span className="text-xs font-medium truncate flex-1">{displayName}</span>
+          <ChevronUp className="h-3 w-3 text-muted-foreground shrink-0" />
+        </>
+      )}
+    </button>
+  );
 
-  const handleAccountSettings = () => {
-    setOpen(false);
-    const modulePrefix = pathname.match(/^\/(tickets|assets|subscription|system-updates|admin)/)?.[1];
-    navigate(modulePrefix ? `/${modulePrefix}/account` : "/account");
-  };
-
-  // Single unified render — same DOM in both states
   return (
-    <div className="py-1.5 border-t border-border">
-      <DropdownMenu open={open} onOpenChange={setOpen}>
-        <TooltipProvider delayDuration={0}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <button className="flex items-center h-8 w-full rounded-lg transition-all duration-200 hover:bg-accent/40 text-left overflow-hidden whitespace-nowrap">
-                  <div className="w-12 flex items-center justify-center flex-shrink-0">
-                    <Avatar className="h-7 w-7">
-                      <AvatarFallback className="text-xs bg-primary/10 text-primary">
-                        {getInitials(userName)}
-                      </AvatarFallback>
-                    </Avatar>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium truncate">{userName}</p>
-                  </div>
-                  <ChevronUp className={cn(
-                    "h-3.5 w-3.5 text-muted-foreground transition-transform flex-shrink-0 mr-2",
-                    open && "rotate-180"
-                  )} />
-                </button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            {collapsed && (
-              <TooltipContent side="right" sideOffset={8} className="z-50">
-                <p className="text-xs">{userName}</p>
-              </TooltipContent>
-            )}
-          </Tooltip>
-        </TooltipProvider>
-        <DropdownMenuContent side={collapsed ? "right" : "top"} align={collapsed ? "end" : "start"} className="w-56">
-          <DropdownMenuItem onClick={handleAccountSettings}>
+    <div className="border-t p-2">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          {collapsed ? (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+                <TooltipContent side="right">{displayName}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : (
+            trigger
+          )}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" side="top" className="w-48">
+          <DropdownMenuItem onClick={() => navigate("/account")}>
             <User className="h-4 w-4 mr-2" />
-            Account Settings
+            My Account
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={handleSignOut} className="text-destructive focus:text-destructive">
+          <DropdownMenuItem onClick={() => signOut()}>
             <LogOut className="h-4 w-4 mr-2" />
             Sign Out
           </DropdownMenuItem>

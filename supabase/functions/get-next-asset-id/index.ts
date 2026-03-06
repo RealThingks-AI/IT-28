@@ -51,22 +51,40 @@ serve(async (req) => {
     const parsedStart = parseInt(startNumberRaw, 10);
     const effectiveStart = Number.isNaN(parsedStart) ? 1 : parsedStart;
  
-    // Call the database function to get the next number
-    const { data: nextNumberData, error: nextNumberError } = await supabaseClient
-      .rpc('get_next_asset_number', {});
- 
-    if (nextNumberError) {
-      console.error('Error getting next asset number:', nextNumberError);
+    // Fetch all existing asset tags for this prefix to find gaps
+    const { data: existingAssets, error: queryError } = await supabaseClient
+      .from('itam_assets')
+      .select('asset_tag')
+      .like('asset_tag', `${prefix}%`);
+
+    if (queryError) {
+      console.error('Error querying existing assets:', queryError);
       return new Response(
         JSON.stringify({ error: 'Failed to generate asset ID' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
- 
-    const rawNextNumber = typeof nextNumberData === 'number'
-      ? nextNumberData
-      : parseInt(String(nextNumberData ?? '0'), 10) || 1;
-    const nextNumber = Math.max(rawNextNumber, effectiveStart);
+
+    // Extract all used numbers into a Set
+    const usedNumbers = new Set<number>();
+    if (existingAssets && existingAssets.length > 0) {
+      for (const asset of existingAssets) {
+        const tag = asset.asset_tag;
+        if (tag && tag.startsWith(prefix)) {
+          const numPart = tag.substring(prefix.length);
+          const num = parseInt(numPart, 10);
+          if (!isNaN(num) && num > 0) {
+            usedNumbers.add(num);
+          }
+        }
+      }
+    }
+
+    // Find the first available gap starting from effectiveStart
+    let nextNumber = effectiveStart;
+    while (usedNumbers.has(nextNumber)) {
+      nextNumber++;
+    }
     const paddedNumber = nextNumber.toString().padStart(paddingLength, '0');
     const nextAssetId = `${prefix}${paddedNumber}`;
 

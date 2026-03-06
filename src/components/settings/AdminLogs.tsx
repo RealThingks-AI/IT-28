@@ -111,6 +111,9 @@ export function AdminLogs() {
   // Fetch total count
   const { data: totalCount } = useQuery({
     queryKey: ["admin-audit-logs-count", dateRange, actionFilter, moduleFilter, showSessionActivity],
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    placeholderData: (prev) => prev,
     queryFn: async () => {
       let query = supabase
         .from("audit_logs")
@@ -142,6 +145,9 @@ export function AdminLogs() {
 
   const { data, isLoading, refetch, isRefetching } = useQuery({
     queryKey: ["admin-audit-logs", dateRange, actionFilter, moduleFilter, showSessionActivity, page, perPage],
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    placeholderData: (prev) => prev,
     queryFn: async () => {
       let query = supabase
         .from("audit_logs")

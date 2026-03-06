@@ -9,13 +9,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight } from "lucide-react";
-import { format } from "date-fns";
+import { ChevronLeft, ChevronRight, CheckCircle2, XCircle, Clock, Minus } from "lucide-react";
+import { format, differenceInDays } from "date-fns";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { SYSTEM_COLUMN_ORDER } from "./AssetColumnSettings";
 import { AssetPhotoPreview } from "./AssetPhotoPreview";
 import { AssetActionsMenu } from "./AssetActionsMenu";
 import { useUISettings } from "@/hooks/useUISettings";
 import { ASSET_STATUS } from "@/lib/assetStatusUtils";
+import { useCurrency } from "@/hooks/useCurrency";
 import { invalidateAllAssetQueries } from "@/lib/assetQueryUtils";
 
 interface AssetsListProps {
@@ -32,6 +34,7 @@ const PAGE_SIZE_OPTIONS = [100, 250, 500, 1000];
 
 // Column minimum widths for proper spacing
 const COLUMN_MIN_WIDTHS: Record<string, string> = {
+  verified: "min-w-[70px]",
   asset_tag: "min-w-[100px]",
   category: "min-w-[90px]",
   status: "min-w-[85px]",
@@ -60,7 +63,7 @@ const COLUMN_MIN_WIDTHS: Record<string, string> = {
 const STATUS_LABELS: Record<string, string> = {
   available: "Available",
   in_use: "In Use",
-  maintenance: "Maintenance",
+  maintenance: "Under Maintenance",
   retired: "Retired",
   disposed: "Disposed",
   lost: "Lost",
@@ -76,9 +79,10 @@ export function AssetsList({
   const queryClient = useQueryClient();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(100);
+  const [pageSize, setPageSize] = useState<number>(100);
   const [sortColumn, setSortColumn] = useState<SortColumn>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
+  const prefsLoadedRef = useRef(false);
 
   // Load column settings from database via hook
   const { assetColumns: savedColumns, uiSettings, updateUISettings } = useUISettings();
@@ -88,11 +92,21 @@ export function AssetsList({
   const resizeRef = useRef<{ col: string; startX: number; startW: number } | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load saved column widths from UI settings
+  // Load saved column widths and list preferences from UI settings
   useEffect(() => {
+    if (prefsLoadedRef.current) return;
     const saved = (uiSettings as any)?.assetColumnWidths;
     if (saved && typeof saved === 'object') {
       setColumnWidths(saved);
+    }
+    const listPrefs = (uiSettings as any)?.assetListPreferences;
+    if (listPrefs) {
+      if (listPrefs.pageSize) setPageSize(listPrefs.pageSize);
+      if (listPrefs.sortColumn) setSortColumn(listPrefs.sortColumn);
+      if (listPrefs.sortDirection) setSortDirection(listPrefs.sortDirection);
+      prefsLoadedRef.current = true;
+    } else if (Object.keys(uiSettings || {}).length > 0) {
+      prefsLoadedRef.current = true;
     }
   }, [uiSettings]);
 
@@ -149,68 +163,65 @@ export function AssetsList({
   // Reset page when filters change
   useEffect(() => {
     setPage(1);
-  }, [filters.search, filters.status, filters.type]);
+  }, [filters.search, filters.status, filters.type, filters.confirmation]);
 
-  // Fetch total count for pagination
-  const { data: totalCount = 0 } = useQuery({
-    queryKey: ["helpdesk-assets-count", filters],
+  // Shared user search query — avoids duplicate lookups in count and data queries
+  const searchTerm = filters.search ? sanitizeSearchInput(filters.search) : "";
+  const { data: matchedUserIds = [] } = useQuery({
+    queryKey: ["assets-user-search", searchTerm],
     queryFn: async () => {
-      let query = supabase.
-      from("itam_assets").
-      select("id", { count: "exact", head: true }).
-      eq("is_active", true);
-
-      if (filters.search) {
-        const s = sanitizeSearchInput(filters.search);
-        query = query.or(
-          `name.ilike.%${s}%,asset_tag.ilike.%${s}%,serial_number.ilike.%${s}%`
-        );
-      }
-      if (filters.status) {
-        query = query.eq("status", filters.status);
-      }
-      if (filters.type) {
-        query = query.eq("category_id", filters.type);
-      }
-
-      const { count, error } = await query;
-      if (error) throw error;
-      return count || 0;
+      if (!searchTerm) return [];
+      const { data } = await supabase
+        .from("users")
+        .select("id")
+        .or(`name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`);
+      return (data || []).map(u => u.id);
     },
+    enabled: !!searchTerm,
     staleTime: 5 * 60 * 1000,
   });
 
-  // Fetch paginated assets with related data
-  const { data: assets = [], isLoading } = useQuery({
-    queryKey: ["helpdesk-assets", filters, page, pageSize, sortColumn, sortDirection],
+  // Build shared OR filter for search
+  const buildSearchFilter = () => {
+    if (!searchTerm) return null;
+    let orFilter = `name.ilike.%${searchTerm}%,asset_tag.ilike.%${searchTerm}%,serial_number.ilike.%${searchTerm}%,model.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`;
+    if (matchedUserIds.length > 0) {
+      orFilter += `,assigned_to.in.(${matchedUserIds.join(",")})`;
+    }
+    return orFilter;
+  };
+
+  // Combined data + count query (eliminates separate count request)
+  const { data: assetsResult, isLoading } = useQuery({
+    queryKey: ["helpdesk-assets", filters, page, pageSize, sortColumn, sortDirection, matchedUserIds],
     queryFn: async () => {
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
 
-      let query = supabase.
-      from("itam_assets").
-      select(`
+      let query = supabase
+        .from("itam_assets")
+        .select(`
           *,
           category:itam_categories(id, name),
           location:itam_locations(id, name, site:itam_sites(id, name)),
           department:itam_departments(id, name),
           make:itam_makes(id, name),
           vendor:itam_vendors(id, name)
-        `).
-      eq("is_active", true).
-      range(from, to);
+        `, { count: "exact" })
+        .eq("is_active", true)
+        .range(from, to);
 
-      if (filters.search) {
-        const s = sanitizeSearchInput(filters.search);
-        query = query.or(
-          `name.ilike.%${s}%,asset_tag.ilike.%${s}%,serial_number.ilike.%${s}%`
-        );
-      }
-      if (filters.status) {
-        query = query.eq("status", filters.status);
-      }
-      if (filters.type) {
-        query = query.eq("category_id", filters.type);
+      const orFilter = buildSearchFilter();
+      if (orFilter) query = query.or(orFilter);
+      if (filters.status) query = query.eq("status", filters.status);
+      if (filters.type) query = query.eq("category_id", filters.type);
+      // Confirmation status filters
+      if (filters.confirmation === "confirmed") query = query.eq("confirmation_status", "confirmed");
+      else if (filters.confirmation === "denied") query = query.eq("confirmation_status", "denied");
+      else if (filters.confirmation === "pending") query = query.eq("confirmation_status", "pending");
+      else if (filters.confirmation === "overdue") {
+        // Overdue = assigned assets where last_confirmed_at is null or > 60 days
+        query = query.not("assigned_to", "is", null);
       }
 
       // Apply sorting
@@ -255,21 +266,35 @@ export function AssetsList({
         query = query.order("created_at", { ascending: false });
       }
 
-      const { data, error } = await query;
+      const { data, count, error } = await query;
       if (error) throw error;
-      return data || [];
+      let filteredData = data || [];
+      // Client-side overdue filter (computed condition)
+      if (filters.confirmation === "overdue") {
+        const now = new Date();
+        filteredData = filteredData.filter((a: any) => {
+          if (!a.last_confirmed_at) return true;
+          return differenceInDays(now, new Date(a.last_confirmed_at)) > 60;
+        });
+      }
+      return { data: filteredData, count: filters.confirmation === "overdue" ? filteredData.length : (count || 0) };
     },
     staleTime: 5 * 60 * 1000,
+    placeholderData: (prev) => prev, // Keep previous data during pagination (no loading flash)
   });
 
-  // Fetch users for assigned_to lookup
+  const assets = assetsResult?.data || [];
+  const totalCount = assetsResult?.count || 0;
+
+  // Unified user lookup — shares cache with layout prefetch
   const { data: usersData = [] } = useQuery({
-    queryKey: ["users-for-assets-list"],
+    queryKey: ["users-list"],
     queryFn: async () => {
-      const { data } = await supabase.from("users").select("id, name, email");
+      const { data } = await supabase.from("users").select("id, name, email, auth_user_id, status, avatar_url").eq("status", "active").order("name");
       return data || [];
     },
     staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 
   // Helper to get user name by ID or return original value if not a UUID
@@ -396,32 +421,33 @@ export function AssetsList({
     onSelectionChange?.(newSelected, createBulkActions(newSelected));
   };
 
+  // Save list preferences to DB
+  const saveListPreferences = useCallback((ps: number, sc: SortColumn, sd: SortDirection) => {
+    updateUISettings.mutate({ assetListPreferences: { pageSize: ps, sortColumn: sc, sortDirection: sd } } as any);
+  }, [updateUISettings]);
+
   const handleSort = (column: string) => {
+    let newCol: SortColumn = column;
+    let newDir: SortDirection = "asc";
     if (sortColumn === column) {
       if (sortDirection === "asc") {
-        setSortDirection("desc");
-      } else if (sortDirection === "desc") {
-        setSortColumn(null);
-        setSortDirection(null);
+        newDir = "desc";
+      } else {
+        newCol = null;
+        newDir = null;
       }
-    } else {
-      setSortColumn(column);
-      setSortDirection("asc");
     }
+    setSortColumn(newCol);
+    setSortDirection(newDir);
+    saveListPreferences(pageSize, newCol, newDir);
   };
 
-  const formatCurrency = (amount: number | null, asset?: any) => {
+  // Use centralized currency hook instead of local duplicate
+  const { formatCurrency: hookFormatCurrency } = useCurrency();
+  const formatCurrencyDisplay = (amount: number | null, asset?: any) => {
     if (amount === null || amount === undefined) return "—";
     const currency = asset?.custom_fields?.currency || "INR";
-    const currencySymbols: Record<string, string> = {
-      INR: "₹",
-      USD: "$",
-      EUR: "€",
-      GBP: "£"
-    };
-    const symbol = currencySymbols[currency] || "₹";
-    const locale = currency === "INR" ? "en-IN" : "en-US";
-    return `${symbol}${amount.toLocaleString(locale)}`;
+    return hookFormatCurrency(amount, currency);
   };
 
   const formatDate = (dateStr: string | null) => {
@@ -458,23 +484,52 @@ export function AssetsList({
 
 
 
-      case "asset_tag":
+      case "asset_tag": {
         // Hide raw UUIDs — only show human-readable asset tags
         const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(asset.asset_tag || "");
+        const searchTerm = filters?.search?.toLowerCase();
+        const tagVal = asset.asset_tag?.toLowerCase() || "";
+        const tagMatches = searchTerm && tagVal.includes(searchTerm);
+        const serialMatches = searchTerm && !tagMatches && asset.serial_number?.toLowerCase()?.includes(searchTerm);
+        const nameMatches = searchTerm && !tagMatches && !serialMatches && asset.name?.toLowerCase()?.includes(searchTerm);
+        const modelMatches = searchTerm && !tagMatches && !serialMatches && !nameMatches && asset.model?.toLowerCase()?.includes(searchTerm);
+        const descMatches = searchTerm && !tagMatches && !serialMatches && !nameMatches && !modelMatches && asset.description?.toLowerCase()?.includes(searchTerm);
         return (
-          <span className="text-primary hover:underline cursor-pointer">
-            {(!asset.asset_tag || isUuid) ? "—" : asset.asset_tag}
-          </span>);
+          <>
+            <span className="text-primary hover:underline cursor-pointer">
+              {(!asset.asset_tag || isUuid) ? "—" : asset.asset_tag}
+            </span>
+            {serialMatches && (
+              <div className="text-[10px] text-muted-foreground/70 truncate max-w-[160px]">S/N: {asset.serial_number}</div>
+            )}
+            {nameMatches && (
+              <div className="text-[10px] text-muted-foreground/70 truncate max-w-[160px]">Name: {asset.name}</div>
+            )}
+            {modelMatches && (
+              <div className="text-[10px] text-muted-foreground/70 truncate max-w-[160px]">Model: {asset.model}</div>
+            )}
+            {descMatches && (
+              <div className="text-[10px] text-muted-foreground/70 truncate max-w-[160px]">Desc: {asset.description}</div>
+            )}
+          </>
+        );
+      }
 
 
       case "make":
         return asset.make?.name || "—";
 
       case "cost":
-        return formatCurrency(asset.purchase_price, asset);
+        return formatCurrencyDisplay(asset.purchase_price, asset);
 
-      case "created_by":
-        return getUserName(asset.created_by) || "—";
+      case "created_by": {
+        const createdByName = getUserName(asset.created_by);
+        if (!createdByName || createdByName === "—") return "—";
+        const createdByUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(asset.created_by || "");
+        return createdByUuid ? (
+          <span className="text-primary hover:underline cursor-pointer" onClick={(e) => { e.stopPropagation(); navigate(`/assets/employees?user=${asset.created_by}`); }}>{createdByName}</span>
+        ) : createdByName;
+      }
 
       case "created_at":
         return formatDate(asset.created_at);
@@ -489,7 +544,9 @@ export function AssetsList({
         return formatDate(asset.purchase_date);
 
       case "purchased_from":
-        return asset.vendor?.name || "—";
+        return asset.vendor?.name ? (
+          <span className="text-primary hover:underline cursor-pointer" onClick={(e) => { e.stopPropagation(); navigate(`/assets/vendors/detail/${asset.vendor.id}`); }}>{asset.vendor.name}</span>
+        ) : "—";
 
       case "serial_number":
         return asset.serial_number || "—";
@@ -517,9 +574,14 @@ export function AssetsList({
       case "site":
         return asset.location?.site?.name || "—";
 
-      case "assigned_to":
-        // Look up user name if it's a UUID, otherwise display as-is
-        return getUserName(asset.assigned_to) || "—";
+      case "assigned_to": {
+        const assignedName = getUserName(asset.assigned_to);
+        if (!assignedName || assignedName === "—") return "—";
+        const assignedIsUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(asset.assigned_to || "");
+        return assignedIsUuid ? (
+          <span className="text-primary hover:underline cursor-pointer" onClick={(e) => { e.stopPropagation(); navigate(`/assets/employees?user=${asset.assigned_to}`); }}>{assignedName}</span>
+        ) : assignedName;
+      }
 
       case "event_date":
         return formatDate(asset.checked_out_at);
@@ -529,6 +591,44 @@ export function AssetsList({
 
       case "event_notes":
         return asset.check_out_notes || "—";
+
+      case "verified": {
+        const confirmStatus = asset.confirmation_status;
+        const lastConfirmed = asset.last_confirmed_at;
+        const isAssigned = !!asset.assigned_to;
+        const now = new Date();
+        const isOverdue = isAssigned && (!lastConfirmed || differenceInDays(now, new Date(lastConfirmed)) > 60);
+
+        let icon, label, color;
+        if (confirmStatus === "confirmed" && !isOverdue) {
+          icon = <CheckCircle2 className="h-4 w-4 text-green-500" />;
+          label = `Confirmed${lastConfirmed ? ` on ${format(new Date(lastConfirmed), "dd MMM yyyy")}` : ""}`;
+          color = "text-green-600";
+        } else if (confirmStatus === "denied") {
+          icon = <XCircle className="h-4 w-4 text-red-500" />;
+          label = "Denied by user";
+          color = "text-red-600";
+        } else if (isOverdue) {
+          icon = <Clock className="h-4 w-4 text-amber-500" />;
+          label = lastConfirmed ? `Overdue — last confirmed ${format(new Date(lastConfirmed), "dd MMM yyyy")}` : "Overdue — never confirmed";
+          color = "text-amber-600";
+        } else {
+          icon = <Minus className="h-4 w-4 text-muted-foreground" />;
+          label = "Not verified";
+          color = "text-muted-foreground";
+        }
+
+        return (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className={`flex items-center gap-1 ${color}`}>{icon}</span>
+              </TooltipTrigger>
+              <TooltipContent side="top"><p className="text-xs">{label}</p></TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        );
+      }
 
       case "status":
         const statusDotColor: Record<string, string> = {
@@ -542,7 +642,7 @@ export function AssetsList({
         const dotColor = statusDotColor[asset.status] || "bg-gray-400";
         return (
           <span className="flex items-center gap-1.5">
-            <span className={`w-2 h-2 rounded-sm shrink-0 ${dotColor}`} />
+            <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
             {STATUS_LABELS[asset.status] || asset.status?.replace("_", " ") || "—"}
           </span>
         );
@@ -570,9 +670,9 @@ export function AssetsList({
             <TableBody>
               {Array.from({ length: 10 }).map((_, i) => (
                 <TableRow key={i} className="border-b border-border">
-                  <TableCell className="py-1"><Skeleton className="h-4 w-6" /></TableCell>
+                  <TableCell className="py-1.5"><Skeleton className="h-4 w-6" /></TableCell>
                   {activeColumns.filter(c => c.visible).slice(0, 8).map((col) => (
-                    <TableCell key={col.id} className="py-1">
+                    <TableCell key={col.id} className="py-1.5">
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
                   ))}
@@ -608,8 +708,8 @@ export function AssetsList({
                 return (
                   <TableHead
                     key={column.id}
-                    className={`whitespace-nowrap cursor-pointer select-none hover:bg-muted/50 text-xs py-1 font-semibold relative group ${
-                    column.id === "cost" ? "text-right" : ""}`}
+                    className={`whitespace-nowrap cursor-pointer select-none hover:bg-muted/50 text-xs py-1.5 font-semibold relative group ${
+                    column.id === "cost" ? "text-right" : ""} ${sortColumn === column.id ? "bg-accent/50" : ""}`}
                     style={w ? { width: w, minWidth: w } : undefined}
                     onClick={() => handleSort(column.id)}>
                     <div className={`flex items-center gap-1 ${column.id === "cost" ? "justify-end" : ""}`}>
@@ -637,9 +737,19 @@ export function AssetsList({
             <TableRow>
                 <TableCell
                 colSpan={activeColumns.length + 3}
-                className="text-center text-muted-foreground py-8">
-
-                  No assets found
+                className="text-center text-muted-foreground py-12">
+                  <div className="flex flex-col items-center gap-2">
+                    <span className="text-sm">
+                      {(filters.search || filters.status || filters.type) 
+                        ? "No assets match your filters" 
+                        : "No assets yet"}
+                    </span>
+                    {!(filters.search || filters.status || filters.type) && (
+                      <Button size="sm" variant="outline" onClick={() => navigate("/assets/add")} className="text-xs">
+                        Add your first asset
+                      </Button>
+                    )}
+                  </div>
                 </TableCell>
               </TableRow> :
 
@@ -647,7 +757,22 @@ export function AssetsList({
             <TableRow
               key={asset.id}
               className="cursor-pointer hover:bg-muted/50 border-b border-border transition-colors"
-              onClick={() => navigate(`/assets/detail/${asset.asset_tag || asset.id}`)}>
+              onClick={() => navigate(`/assets/detail/${asset.asset_tag || asset.asset_id || asset.id}`)}
+              onMouseEnter={() => {
+                const tag = asset.asset_tag || asset.asset_id || asset.id;
+                queryClient.prefetchQuery({
+                  queryKey: ["itam-asset-detail", tag],
+                  queryFn: async () => {
+                    const { data } = await supabase
+                      .from("itam_assets")
+                      .select("*")
+                      .or(`asset_tag.eq."${sanitizeSearchInput(String(tag))}",asset_id.eq."${sanitizeSearchInput(String(tag))}"`)
+                      .maybeSingle();
+                    return data;
+                  },
+                  staleTime: 60_000,
+                });
+              }}>
 
                   {showSelection && (
                     <TableCell onClick={(e) => e.stopPropagation()} className="whitespace-nowrap py-1">
@@ -658,7 +783,7 @@ export function AssetsList({
                         } />
                     </TableCell>
                   )}
-                  <TableCell className="whitespace-nowrap text-xs py-1 text-muted-foreground">
+                  <TableCell className="whitespace-nowrap text-xs py-1.5 text-muted-foreground">
                     {(page - 1) * pageSize + index + 1}
                   </TableCell>
                   {activeColumns.map((column) => {
@@ -666,7 +791,7 @@ export function AssetsList({
                 return (
               <TableCell
                 key={column.id}
-                className={`whitespace-nowrap text-xs py-1 ${
+                className={`whitespace-nowrap text-xs py-1.5 ${
                 column.id === "cost" ? "text-right" : ""}`}
                 style={w ? { width: w, minWidth: w, maxWidth: w, overflow: 'hidden', textOverflow: 'ellipsis' } : undefined}>
 
@@ -697,8 +822,10 @@ export function AssetsList({
             <Select
               value={pageSize.toString()}
               onValueChange={(value) => {
-                setPageSize(Number(value));
+                const newSize = Number(value);
+                setPageSize(newSize);
                 setPage(1);
+                saveListPreferences(newSize, sortColumn, sortDirection);
               }}>
 
               <SelectTrigger className="w-[70px] h-7 text-xs">
@@ -715,14 +842,6 @@ export function AssetsList({
           </div>
 
           <div className="flex items-center gap-0.5">
-            
-
-
-
-
-
-
-
 
             <Button
               variant="outline"
@@ -747,14 +866,6 @@ export function AssetsList({
 
               <ChevronRight className="h-3.5 w-3.5" />
             </Button>
-            
-
-
-
-
-
-
-
 
           </div>
         </div>

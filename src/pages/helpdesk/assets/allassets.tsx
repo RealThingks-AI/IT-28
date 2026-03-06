@@ -1,16 +1,16 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { createPortal } from "react-dom";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { X, Search, Plus, ChevronDown, Settings, FileSpreadsheet, CheckSquare, UserCheck, Wrench, Package, Trash2 } from "lucide-react";
+import { X, Search, Plus, Settings, FileSpreadsheet, CheckSquare, UserCheck, Wrench, Package, Trash2 } from "lucide-react";
+import { sanitizeSearchInput } from "@/lib/utils";
 import { AssetsList } from "@/components/helpdesk/assets/AssetsList";
-import { AssetColumnSettings, SYSTEM_COLUMN_ORDER } from "@/components/helpdesk/assets/AssetColumnSettings";
+import { AssetColumnSettings } from "@/components/helpdesk/assets/AssetColumnSettings";
 import { useAssetSetupConfig } from "@/hooks/useAssetSetupConfig";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ASSET_STATUS_OPTIONS } from "@/lib/assetStatusUtils";
-import { useUISettings } from "@/hooks/useUISettings";
 import { toast } from "sonner";
 import {
   DropdownMenu,
@@ -19,42 +19,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-// XLSX export utility - dynamically loaded
-const exportToXLSX = async (data: any[], filename: string, columns: { id: string; label: string }[]) => {
-  if (!data || data.length === 0) { toast.error("No data to export"); return; }
-  const resolveValue = (item: any, colId: string): string => {
-    switch (colId) {
-      case "asset_tag": return item.asset_tag || "";
-      case "category": return item.category?.name || "";
-      case "status": return item.status || "";
-      case "make": return item.make?.name || "";
-      case "model": return item.model || "";
-      case "serial_number": return item.serial_number || "";
-      case "assigned_to": return item.assigned_user?.name || item.assigned_user?.email || item.assigned_to || "";
-      case "location": return item.location?.name || "";
-      case "site": return item.location?.site?.name || "";
-      case "department": return item.department?.name || "";
-      case "cost": return item.purchase_price?.toString() || "";
-      case "purchase_date": return item.purchase_date || "";
-      case "purchased_from": return item.vendor?.name || "";
-      case "description": return item.description || "";
-      case "created_at": return item.created_at || "";
-      case "created_by": return item.created_user?.name || item.created_user?.email || item.created_by || "";
-      default: return "";
-    }
-  };
-  const rows = data.map(item => {
-    const row: Record<string, string> = {};
-    columns.forEach(col => { row[col.label] = resolveValue(item, col.id); });
-    return row;
-  });
-  const XLSX = await import("xlsx");
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Assets");
-  XLSX.writeFile(wb, `${filename}.xlsx`);
-  toast.success(`Exported ${data.length} records to ${filename}.xlsx`);
-};
 
 export default function AllAssets() {
   const navigate = useNavigate();
@@ -65,15 +29,14 @@ export default function AllAssets() {
     type: null,
     warranty: searchParams.get("warranty") || null,
     recent: searchParams.get("recent") || null,
+    confirmation: searchParams.get("confirmation") || null,
   });
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [bulkActions, setBulkActions] = useState<any>(null);
-  const [assetsData, setAssetsData] = useState<any[]>([]);
   const [bulkSelectMode, setBulkSelectMode] = useState(false);
   const [columnSettingsOpen, setColumnSettingsOpen] = useState(false);
   const [localSearch, setLocalSearch] = useState(searchParams.get("search") || "");
   const { categories } = useAssetSetupConfig();
-  const { assetColumns: savedColumns } = useUISettings();
   // Confirmation dialog states
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean; title: string; description: string; action: () => void; variant: "default" | "destructive";
@@ -88,7 +51,8 @@ export default function AllAssets() {
     const status = searchParams.get("status") || null;
     const warranty = searchParams.get("warranty") || null;
     const recent = searchParams.get("recent") || null;
-    setFilters(prev => ({ ...prev, search, status, warranty, recent }));
+    const confirmation = searchParams.get("confirmation") || null;
+    setFilters(prev => ({ ...prev, search, status, warranty, recent, confirmation }));
     setLocalSearch(search);
   }, [searchParams]);
 
@@ -98,14 +62,38 @@ export default function AllAssets() {
   }, [bulkSelectMode]);
 
   const handleSearchChange = (value: string) => {
-    setFilters(prev => ({ ...prev, search: value }));
-    if (value) { searchParams.set("search", value); } else { searchParams.delete("search"); }
+    const sanitized = sanitizeSearchInput(value);
+    setFilters(prev => ({ ...prev, search: sanitized }));
+    if (sanitized) { searchParams.set("search", sanitized); } else { searchParams.delete("search"); }
     setSearchParams(searchParams, { replace: true });
   };
 
+  // Debounced live search (300ms)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleSearchChangeRef = useRef(handleSearchChange);
+  handleSearchChangeRef.current = handleSearchChange;
+
+  const handleLocalSearchChange = useCallback((value: string) => {
+    setLocalSearch(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      handleSearchChangeRef.current(value.trim());
+    }, 300);
+  }, []);
+
+  // Cleanup debounce on unmount
+  useEffect(() => { return () => { if (debounceRef.current) clearTimeout(debounceRef.current); }; }, []);
+
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (localSearch.trim()) handleSearchChange(localSearch.trim());
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    handleSearchChange(localSearch.trim());
+  };
+
+  const handleSearchClear = () => {
+    setLocalSearch("");
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    handleSearchChange("");
   };
 
   const handleStatusChange = (value: string) => {
@@ -120,29 +108,20 @@ export default function AllAssets() {
     setFilters(prev => ({ ...prev, type: selectedCategory?.id || null, typeName: value === "all" ? null : value }));
   };
 
+  const handleConfirmationChange = (value: string) => {
+    const confirmation = value === "all" ? null : value;
+    setFilters(prev => ({ ...prev, confirmation }));
+    if (confirmation) { searchParams.set("confirmation", confirmation); } else { searchParams.delete("confirmation"); }
+    setSearchParams(searchParams, { replace: true });
+  };
+
   const clearFilters = () => {
-    setFilters({ search: "", status: null, type: null, typeName: null, warranty: null, recent: null });
+    setFilters({ search: "", status: null, type: null, typeName: null, warranty: null, recent: null, confirmation: null });
     setSearchParams({}, { replace: true });
     setLocalSearch("");
   };
 
-  const getVisibleColumnsForExport = () => {
-    const columns = savedColumns && savedColumns.length > 0
-      ? SYSTEM_COLUMN_ORDER.map(systemCol => {
-          const savedCol = savedColumns.find(c => c.id === systemCol.id);
-          return savedCol ? { ...systemCol, visible: savedCol.visible } : systemCol;
-        })
-      : [...SYSTEM_COLUMN_ORDER];
-    return columns.filter(c => c.visible).sort((a, b) => a.order_index - b.order_index);
-  };
-
-  const handleExportToExcel = () => {
-    const visibleColumns = getVisibleColumnsForExport();
-    if (assetsData.length > 0) { exportToXLSX(assetsData, "assets-export", visibleColumns); }
-    else { toast.info("No data available to export. Load assets first."); }
-  };
-
-  const hasActiveFilters = filters.search || filters.status || filters.type || filters.warranty || filters.recent;
+  const hasActiveFilters = filters.search || filters.status || filters.type || filters.warranty || filters.recent || filters.confirmation;
 
   const headerContent = (
     <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -152,11 +131,11 @@ export default function AllAssets() {
         <Input
           placeholder="Search assets..."
           value={localSearch}
-          onChange={(e) => setLocalSearch(e.target.value)}
+          onChange={(e) => handleLocalSearchChange(e.target.value)}
           className="pl-7 pr-7 h-7 w-[280px] text-xs"
         />
         {localSearch && (
-          <Button type="button" variant="ghost" size="icon" onClick={() => setLocalSearch("")} className="absolute right-0.5 top-1/2 -translate-y-1/2 h-5 w-5">
+          <Button type="button" variant="ghost" size="icon" onClick={handleSearchClear} className="absolute right-0.5 top-1/2 -translate-y-1/2 h-5 w-5">
             <X className="h-3 w-3" />
           </Button>
         )}
@@ -193,6 +172,19 @@ export default function AllAssets() {
         </SelectContent>
       </Select>
 
+      <Select value={filters.confirmation || "all"} onValueChange={handleConfirmationChange}>
+        <SelectTrigger className="w-[160px] h-7 text-xs">
+          <SelectValue placeholder="Confirmation" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All Verification</SelectItem>
+          <SelectItem value="confirmed">Confirmed</SelectItem>
+          <SelectItem value="denied">Denied</SelectItem>
+          <SelectItem value="pending">Pending</SelectItem>
+          <SelectItem value="overdue">Overdue</SelectItem>
+        </SelectContent>
+      </Select>
+
       {hasActiveFilters && (
         <Button variant="ghost" size="sm" onClick={clearFilters} className="h-7 gap-1 text-xs px-2">
           <X className="h-3 w-3" />
@@ -213,7 +205,7 @@ export default function AllAssets() {
               <Settings className="mr-2 h-3.5 w-3.5" />
               Customize Columns
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleExportToExcel}>
+            <DropdownMenuItem onClick={() => navigate("/assets/import-export")}>
               <FileSpreadsheet className="mr-2 h-3.5 w-3.5" />
               Export to Excel
             </DropdownMenuItem>
@@ -282,6 +274,18 @@ export default function AllAssets() {
       {/* Portal toolbar into layout header */}
       {portalTarget && createPortal(headerContent, portalTarget)}
 
+      {/* Bulk selection indicator bar */}
+      {bulkSelectMode && selectedAssetIds.length > 0 && (
+        <div className="px-3 py-1.5 bg-primary/10 border-b border-primary/20 flex items-center gap-2 text-xs">
+          <CheckSquare className="h-3.5 w-3.5 text-primary" />
+          <span className="font-medium text-primary">{selectedAssetIds.length} asset{selectedAssetIds.length !== 1 ? 's' : ''} selected</span>
+          <Button variant="ghost" size="sm" className="h-5 px-2 text-xs ml-auto" onClick={() => setBulkSelectMode(false)}>
+            <X className="h-3 w-3 mr-1" />
+            Cancel
+          </Button>
+        </div>
+      )}
+
       <div className="px-3 py-2 flex-1 overflow-hidden flex flex-col">
         <AssetsList
           filters={filters}
@@ -290,14 +294,12 @@ export default function AllAssets() {
             setSelectedAssetIds(selectedIds);
             setBulkActions(actions);
           }}
-          onDataLoad={(data) => setAssetsData(data)}
         />
       </div>
 
       <AssetColumnSettings
         open={columnSettingsOpen}
         onOpenChange={setColumnSettingsOpen}
-        onColumnsChange={() => {}}
       />
 
       <ConfirmDialog

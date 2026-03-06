@@ -9,6 +9,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
@@ -231,6 +232,9 @@ export function AdminUsers() {
         role: normalizeRole(rolesMap.get(user.auth_user_id) || user.role),
       })) as User[];
     },
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    placeholderData: (prev) => prev,
   });
 
   const updateRole = useMutation({
@@ -254,17 +258,13 @@ export function AdminUsers() {
   const deleteUser = useMutation({
     mutationFn: async (targetUserId: string) => {
       const { data: sessionData } = await supabase.auth.getSession();
-      const response = await fetch(
-        `https://iarndwlbrmjbsjvugqvr.supabase.co/functions/v1/delete-user`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionData.session?.access_token}` },
-          body: JSON.stringify({ targetUserId }),
-        }
-      );
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Failed to delete user");
-      return result;
+      const response = await supabase.functions.invoke("delete-user", {
+        body: { targetUserId },
+        headers: { Authorization: `Bearer ${sessionData.session?.access_token}` },
+      });
+      if (response.error) throw new Error(response.error.message || "Failed to delete user");
+      if (response.data?.error) throw new Error(response.data.error);
+      return response.data;
     },
     onSuccess: () => { toast.success("User deleted successfully"); },
     onError: (error: Error) => { toast.error("Failed to delete user: " + error.message); },
@@ -481,7 +481,7 @@ export function AdminUsers() {
                 <SortableTableHeader column="role" label="Role" sortConfig={sortConfig} onSort={handleSort} className="text-xs min-w-[90px]" />
                 <SortableTableHeader column="status" label="Status" sortConfig={sortConfig} onSort={handleSort} className="text-xs min-w-[90px]" />
                 <SortableTableHeader column="last_login" label="Last Login" sortConfig={sortConfig} onSort={handleSort} className="text-xs min-w-[100px]" />
-                <th className="text-xs w-[44px]" />
+                <TableHead className="text-xs w-[44px]" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -646,7 +646,7 @@ export function AdminUsers() {
                 <Separator />
 
                 {/* Recent Activity */}
-                <UserRecentActivity userId={detailUser.auth_user_id} />
+                <UserRecentActivity userId={detailUser.id} />
 
                 <Separator />
 

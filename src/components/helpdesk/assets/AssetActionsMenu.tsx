@@ -21,7 +21,8 @@ import {
   Copy, 
   Mail,
   MapPin,
-  AlertTriangle
+  AlertTriangle,
+  ShieldCheck
 } from "lucide-react";
 import { ASSET_STATUS, canCheckIn, canCheckOut } from "@/lib/assetStatusUtils";
 import { invalidateAllAssetQueries } from "@/lib/assetQueryUtils";
@@ -32,6 +33,7 @@ import { MarkAsLostDialog } from "./MarkAsLostDialog";
 import { ReplicateAssetDialog } from "./ReplicateAssetDialog";
 import { EmailAssetDialog } from "./EmailAssetDialog";
 import { DisposeAssetDialog } from "./DisposeAssetDialog";
+import { ReassignAssetDialog } from "./ReassignAssetDialog";
 
 interface AssetActionsMenuProps {
   asset: {
@@ -56,6 +58,7 @@ export function AssetActionsMenu({ asset, onActionComplete }: AssetActionsMenuPr
   const [replicateDialogOpen, setReplicateDialogOpen] = useState(false);
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
   const [disposeDialogOpen, setDisposeDialogOpen] = useState(false);
+  const [reassignDialogOpen, setReassignDialogOpen] = useState(false);
 
   const invalidateQueries = () => {
     invalidateAllAssetQueries(queryClient);
@@ -214,10 +217,22 @@ export function AssetActionsMenu({ asset, onActionComplete }: AssetActionsMenuPr
               Check Out
             </DropdownMenuItem>
           )}
+          {asset.status === ASSET_STATUS.IN_USE && (
+            <DropdownMenuItem onClick={() => setReassignDialogOpen(true)}>
+              <Copy className="h-4 w-4 mr-2" />
+              Reassign
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onClick={handleMaintenance}>
             <Wrench className="h-4 w-4 mr-2" />
             Repair
           </DropdownMenuItem>
+          {(asset.status === ASSET_STATUS.AVAILABLE || asset.status === ASSET_STATUS.IN_USE) && (
+            <DropdownMenuItem onClick={handleLost}>
+              <MapPin className="h-4 w-4 mr-2" />
+              Mark as Lost
+            </DropdownMenuItem>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={handleDispose}>
             <AlertTriangle className="h-4 w-4 mr-2" />
@@ -227,6 +242,62 @@ export function AssetActionsMenu({ asset, onActionComplete }: AssetActionsMenuPr
             <Mail className="h-4 w-4 mr-2" />
             Email to User
           </DropdownMenuItem>
+          {asset.assigned_to && (
+            <DropdownMenuItem onClick={async () => {
+              try {
+                // Fetch assigned user email
+                const { data: userData } = await supabase
+                  .from("users")
+                  .select("id, email, name, auth_user_id")
+                  .eq("id", asset.assigned_to!)
+                  .single();
+                if (!userData?.email) { toast.error("No email found for assigned user"); return; }
+
+                // Create confirmation record
+                const token = crypto.randomUUID();
+                const { data: confirmation, error: confError } = await supabase
+                  .from("itam_asset_confirmations")
+                  .insert({
+                    user_id: userData.id,
+                    status: "pending",
+                    token,
+                  })
+                  .select("id")
+                  .single();
+                if (confError) throw confError;
+
+                // Create confirmation item
+                await supabase.from("itam_asset_confirmation_items").insert({
+                  confirmation_id: confirmation.id,
+                  asset_id: asset.id,
+                  status: "pending",
+                });
+
+                // Send email
+                await supabase.functions.invoke("send-asset-email", {
+                  body: {
+                    to: userData.email,
+                    userName: userData.name || userData.email,
+                    template: "asset_confirmation",
+                    data: {
+                      confirmationId: confirmation.id,
+                      token,
+                      assets: [{ asset_tag: asset.asset_tag || asset.asset_id, name: asset.name }],
+                    },
+                  },
+                });
+
+                toast.success("Confirmation email sent");
+                invalidateQueries();
+              } catch (err) {
+                console.error(err);
+                toast.error("Failed to send confirmation email");
+              }
+            }}>
+              <ShieldCheck className="h-4 w-4 mr-2" />
+              Send Confirmation
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onClick={handleReplicate}>
             <Copy className="h-4 w-4 mr-2" />
             Replicate
@@ -300,6 +371,15 @@ export function AssetActionsMenu({ asset, onActionComplete }: AssetActionsMenuPr
         onOpenChange={setDisposeDialogOpen}
         assetId={asset.id}
         assetName={asset.asset_tag || asset.name || 'Asset'}
+        onSuccess={invalidateQueries}
+      />
+
+      <ReassignAssetDialog
+        open={reassignDialogOpen}
+        onOpenChange={setReassignDialogOpen}
+        assetId={asset.id}
+        assetName={asset.asset_tag || asset.name || 'Asset'}
+        currentAssignedTo={asset.assigned_to || null}
         onSuccess={invalidateQueries}
       />
     </>

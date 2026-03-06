@@ -1,15 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { getMonthlyEquivalentINR, getAnnualContributionINR, getCycleThresholds, SUB_QUERY_KEYS } from "@/lib/subscriptionUtils";
 
-/**
- * Simplified subscription stats hook for single-company internal use.
- * Fetches all subscription data without organisation filtering.
- */
 export const useSubscriptionStats = () => {
   return useQuery({
-    queryKey: ["subscription-stats"],
-    staleTime: 5 * 60 * 1000,  // 5 minutes
-    gcTime: 10 * 60 * 1000,    // 10 minutes cache retention
+    queryKey: [...SUB_QUERY_KEYS.stats],
+    staleTime: 30_000,
+    placeholderData: (prev: any) => prev,
+    gcTime: 10 * 60 * 1000,
     queryFn: async () => {
       const { data: tools, error } = await supabase
         .from("subscriptions_tools")
@@ -21,17 +19,29 @@ export const useSubscriptionStats = () => {
       const trialTools = tools?.filter(t => t.status === "trial").length || 0;
       const expiredTools = tools?.filter(t => t.status === "expired").length || 0;
 
-      // Calculate renewals in next 30 days
       const now = new Date();
-      const thirtyDaysLater = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
       const pendingRenewals = tools?.filter(t => {
         if (!t.renewal_date || t.status !== "active") return false;
-        const renewalDate = new Date(t.renewal_date);
-        return renewalDate >= now && renewalDate <= thirtyDaysLater;
+        const d = new Date(t.renewal_date);
+        const diffDays = Math.ceil((d.getTime() - now.getTime()) / 86400000);
+        const { expiringSoonDays } = getCycleThresholds(t.subscription_type);
+        return diffDays >= 0 && diffDays <= expiringSoonDays;
       }).length || 0;
 
       const totalLicenses = tools?.reduce((sum, t) => sum + (t.license_count || 0), 0) || 0;
       const vendorCount = new Set(tools?.map(t => t.vendor_id).filter(Boolean)).size;
+
+      const monthlyBurn = tools
+        ?.filter(t => t.status === "active")
+        .reduce((sum, t) => {
+          return sum + getMonthlyEquivalentINR(Number(t.total_cost || 0), t.currency, t.subscription_type);
+        }, 0) || 0;
+
+      const annualCost = tools
+        ?.filter(t => t.status === "active")
+        .reduce((sum, t) => {
+          return sum + getAnnualContributionINR(Number(t.total_cost || 0), t.currency, t.subscription_type, (t as any).purchase_date || t.created_at);
+        }, 0) || 0;
 
       return {
         total: tools?.length || 0,
@@ -41,6 +51,8 @@ export const useSubscriptionStats = () => {
         pendingRenewals,
         totalLicenses,
         vendorCount,
+        monthlyBurn,
+        annualCost,
       };
     },
   });

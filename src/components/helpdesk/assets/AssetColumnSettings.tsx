@@ -30,6 +30,7 @@ const SYSTEM_COLUMN_ORDER: AssetColumn[] = [
   { id: "asset_photo", label: "Image", visible: false, order_index: 0, category: "asset" },
   { id: "asset_tag", label: "Asset Tag ID", visible: true, locked: true, required: true, order_index: 1, category: "asset" },
   { id: "status", label: "Status", visible: true, order_index: 2, category: "event" },
+  { id: "verified", label: "Verified", visible: true, order_index: 2.5, category: "event" },
   { id: "category", label: "Category", visible: true, order_index: 3, category: "linking" },
   { id: "make", label: "Make", visible: true, order_index: 4, category: "asset" },
   { id: "model", label: "Model", visible: true, order_index: 5, category: "asset" },

@@ -12,6 +12,7 @@ export const useUnifiedRequests = (requestType: RequestType = 'all') => {
     queryKey: ["unified-requests", requestType],
     staleTime: 60 * 1000,      // 1 minute
     gcTime: 5 * 60 * 1000,     // 5 minutes cache retention
+    placeholderData: (prev) => prev,
     queryFn: async () => {
       let query = supabase
         .from("helpdesk_tickets")
@@ -43,6 +44,7 @@ export const useUnifiedRequestsStats = () => {
     queryKey: ["unified-requests-stats"],
     staleTime: 2 * 60 * 1000,  // 2 minutes
     gcTime: 5 * 60 * 1000,     // 5 minutes cache retention
+    placeholderData: (prev) => prev,
     queryFn: async () => {
       const { data: requests, count: total } = await supabase
         .from("helpdesk_tickets")

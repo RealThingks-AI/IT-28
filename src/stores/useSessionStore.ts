@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { AppRole } from "@/hooks/useUserRole";
 
 const CACHE_KEY = "session-store-cache";
-const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 interface CachedSession {
   role: AppRole;
@@ -22,6 +22,7 @@ interface SessionState {
   status: "idle" | "loading" | "ready";
   retries: number;
   bootstrap: () => Promise<void>;
+  forceRefresh: () => Promise<void>;
   clear: () => void;
 }
 
@@ -74,7 +75,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   bootstrap: async () => {
     const current = get();
     if (current.status === "loading" || current.status === "ready") return;
-    if (current.retries >= MAX_RETRIES) return;
 
     set({ status: "loading" });
 
@@ -125,6 +125,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       console.error("Bootstrap failed:", err);
       set({ status: "idle", retries: current.retries + 1 });
     }
+  },
+
+  forceRefresh: async () => {
+    set({ status: "idle", retries: 0 });
+    try { localStorage.removeItem(CACHE_KEY); } catch { /* ignore */ }
+    await get().bootstrap();
   },
 
   clear: () => {

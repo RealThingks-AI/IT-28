@@ -1655,6 +1655,95 @@ export type Database = {
           },
         ]
       }
+      itam_asset_confirmation_items: {
+        Row: {
+          asset_id: string
+          asset_name: string | null
+          asset_tag: string | null
+          confirmation_id: string
+          deny_reason: string | null
+          id: string
+          responded_at: string | null
+          response: string | null
+        }
+        Insert: {
+          asset_id: string
+          asset_name?: string | null
+          asset_tag?: string | null
+          confirmation_id: string
+          deny_reason?: string | null
+          id?: string
+          responded_at?: string | null
+          response?: string | null
+        }
+        Update: {
+          asset_id?: string
+          asset_name?: string | null
+          asset_tag?: string | null
+          confirmation_id?: string
+          deny_reason?: string | null
+          id?: string
+          responded_at?: string | null
+          response?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "itam_asset_confirmation_items_confirmation_id_fkey"
+            columns: ["confirmation_id"]
+            isOneToOne: false
+            referencedRelation: "itam_asset_confirmations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      itam_asset_confirmations: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          id: string
+          requested_at: string
+          requested_by: string | null
+          status: string
+          token: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          requested_at?: string
+          requested_by?: string | null
+          status?: string
+          token?: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          requested_at?: string
+          requested_by?: string | null
+          status?: string
+          token?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "itam_asset_confirmations_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "itam_asset_confirmations_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       itam_asset_documents: {
         Row: {
           asset_id: string
@@ -1867,6 +1956,7 @@ export type Database = {
           check_out_notes: string | null
           checked_out_at: string | null
           checked_out_to: string | null
+          confirmation_status: string | null
           created_at: string | null
           created_by: string | null
           custom_fields: Json | null
@@ -1876,6 +1966,7 @@ export type Database = {
           expected_return_date: string | null
           id: string
           is_active: boolean | null
+          last_confirmed_at: string | null
           location_id: string | null
           make_id: string | null
           model: string | null
@@ -1902,6 +1993,7 @@ export type Database = {
           check_out_notes?: string | null
           checked_out_at?: string | null
           checked_out_to?: string | null
+          confirmation_status?: string | null
           created_at?: string | null
           created_by?: string | null
           custom_fields?: Json | null
@@ -1911,6 +2003,7 @@ export type Database = {
           expected_return_date?: string | null
           id?: string
           is_active?: boolean | null
+          last_confirmed_at?: string | null
           location_id?: string | null
           make_id?: string | null
           model?: string | null
@@ -1937,6 +2030,7 @@ export type Database = {
           check_out_notes?: string | null
           checked_out_at?: string | null
           checked_out_to?: string | null
+          confirmation_status?: string | null
           created_at?: string | null
           created_by?: string | null
           custom_fields?: Json | null
@@ -1946,6 +2040,7 @@ export type Database = {
           expected_return_date?: string | null
           id?: string
           is_active?: boolean | null
+          last_confirmed_at?: string | null
           location_id?: string | null
           make_id?: string | null
           model?: string | null
@@ -2226,6 +2321,45 @@ export type Database = {
           id?: string
           tenant_id?: number | null
           updated_at?: string | null
+        }
+        Relationships: []
+      }
+      itam_email_logs: {
+        Row: {
+          asset_id: string | null
+          created_at: string | null
+          error_message: string | null
+          id: string
+          recipient_email: string
+          sent_by: string | null
+          status: string | null
+          subject: string | null
+          template_id: string
+          tenant_id: number | null
+        }
+        Insert: {
+          asset_id?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          recipient_email: string
+          sent_by?: string | null
+          status?: string | null
+          subject?: string | null
+          template_id: string
+          tenant_id?: number | null
+        }
+        Update: {
+          asset_id?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          recipient_email?: string
+          sent_by?: string | null
+          status?: string | null
+          subject?: string | null
+          template_id?: string
+          tenant_id?: number | null
         }
         Relationships: []
       }
@@ -3518,64 +3652,100 @@ export type Database = {
       }
       subscriptions_tools: {
         Row: {
-          billing_cycle: string | null
+          auto_renew: boolean | null
           category: string | null
           contract_end_date: string | null
+          contract_number: string | null
           contract_start_date: string | null
           cost_per_license: number | null
           created_at: string | null
-          description: string | null
+          currency: string | null
+          department: string | null
           id: string
           is_active: boolean | null
           license_count: number | null
+          next_payment_date: string | null
           notes: string | null
+          owner_email: string | null
+          owner_name: string | null
+          payment_terms: string | null
+          purchase_date: string | null
+          quantity: number | null
+          region: string | null
+          renewal_alert_days: number | null
           renewal_date: string | null
           status: string | null
+          subscription_type: string | null
           tenant_id: number | null
           tool_name: string
           total_cost: number | null
+          unit_cost: number | null
           updated_at: string | null
           vendor_id: string | null
           website_url: string | null
         }
         Insert: {
-          billing_cycle?: string | null
+          auto_renew?: boolean | null
           category?: string | null
           contract_end_date?: string | null
+          contract_number?: string | null
           contract_start_date?: string | null
           cost_per_license?: number | null
           created_at?: string | null
-          description?: string | null
+          currency?: string | null
+          department?: string | null
           id?: string
           is_active?: boolean | null
           license_count?: number | null
+          next_payment_date?: string | null
           notes?: string | null
+          owner_email?: string | null
+          owner_name?: string | null
+          payment_terms?: string | null
+          purchase_date?: string | null
+          quantity?: number | null
+          region?: string | null
+          renewal_alert_days?: number | null
           renewal_date?: string | null
           status?: string | null
+          subscription_type?: string | null
           tenant_id?: number | null
           tool_name: string
           total_cost?: number | null
+          unit_cost?: number | null
           updated_at?: string | null
           vendor_id?: string | null
           website_url?: string | null
         }
         Update: {
-          billing_cycle?: string | null
+          auto_renew?: boolean | null
           category?: string | null
           contract_end_date?: string | null
+          contract_number?: string | null
           contract_start_date?: string | null
           cost_per_license?: number | null
           created_at?: string | null
-          description?: string | null
+          currency?: string | null
+          department?: string | null
           id?: string
           is_active?: boolean | null
           license_count?: number | null
+          next_payment_date?: string | null
           notes?: string | null
+          owner_email?: string | null
+          owner_name?: string | null
+          payment_terms?: string | null
+          purchase_date?: string | null
+          quantity?: number | null
+          region?: string | null
+          renewal_alert_days?: number | null
           renewal_date?: string | null
           status?: string | null
+          subscription_type?: string | null
           tenant_id?: number | null
           tool_name?: string
           total_cost?: number | null
+          unit_cost?: number | null
           updated_at?: string | null
           vendor_id?: string | null
           website_url?: string | null
@@ -4492,6 +4662,7 @@ export type Database = {
         }
         Returns: string
       }
+      get_app_user_id: { Args: never; Returns: string }
       get_appmaster_admin_details: {
         Args: never
         Returns: {

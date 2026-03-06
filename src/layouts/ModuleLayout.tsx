@@ -1,6 +1,7 @@
 import { Outlet, Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { ModuleSidebar, type SidebarItem } from "@/components/ModuleSidebar";
+import { Skeleton } from "@/components/ui/skeleton";
 import { LucideIcon } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 
@@ -30,6 +31,11 @@ const routeTitles: Record<string, string> = {
   "/assets/import-export": "Import / Export",
   "/assets/advanced": "Asset Management",
   "/assets/lists": "Custom Lists",
+  // Subscription module
+  "/subscription": "Subscription Dashboard",
+  "/subscription/tools": "All Subscriptions",
+  "/subscription/new": "New Subscription",
+  "/subscription/advanced": "Subscription Management",
 };
 
 function getDynamicTitle(pathname: string): string | null {
@@ -40,6 +46,7 @@ function getDynamicTitle(pathname: string): string | null {
   if (pathname.startsWith("/assets/purchase-orders/po-detail/")) return "Purchase Order Details";
   if (pathname.startsWith("/assets/depreciation/ledger/")) return "Depreciation Ledger";
   if (pathname.startsWith("/assets/depreciation/profile-detail/")) return "Depreciation Profile";
+  if (pathname.startsWith("/subscription/detail/")) return "Subscription Details";
   return null;
 }
 
@@ -71,15 +78,36 @@ export default function ModuleLayout({ moduleName, moduleIcon, sidebarItems, pag
 
   if (!loading && !user) return <Navigate to="/login" replace />;
 
+  if (loading) {
+    return (
+      <div className="h-screen flex w-full overflow-hidden">
+        {/* Sidebar skeleton */}
+        <div className="w-[180px] h-screen border-r bg-background flex flex-col shrink-0">
+          <div className="h-10 border-b flex items-center px-4"><Skeleton className="h-5 w-24" /></div>
+          <div className="flex-1 py-2 px-2 space-y-1">
+            {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-9 w-full rounded-lg" />)}
+          </div>
+        </div>
+        {/* Main skeleton */}
+        <div className="flex-1 h-screen flex flex-col bg-background">
+          <div className="h-11 border-b flex items-center px-4"><Skeleton className="h-4 w-32" /></div>
+          <div className="flex-1 p-4 space-y-3">
+            <Skeleton className="h-8 w-48" />
+            <div className="grid grid-cols-5 gap-3">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-[72px] rounded-lg" />)}</div>
+            <Skeleton className="h-64 w-full rounded-lg" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen flex w-full overflow-hidden">
       <ModuleSidebar moduleName={moduleName} moduleIcon={moduleIcon} items={sidebarItems} />
       <main className="flex-1 h-screen flex flex-col bg-background overflow-hidden">
-        <header className="border-b px-4 flex items-center justify-between shrink-0 min-h-[2.75rem]">
+        <header className="bg-background px-4 flex items-center justify-between shrink-0 h-11">
           <div className="flex items-center gap-3 flex-1 min-w-0">
-            {!portalHasContent && (
-              <h1 className="text-sm font-semibold text-foreground whitespace-nowrap">{derivedTitle}</h1>
-            )}
+            <h1 className="text-sm font-semibold text-foreground whitespace-nowrap">{derivedTitle}</h1>
             <div id="module-header-portal" ref={portalRef} className="flex-1" />
           </div>
         </header>

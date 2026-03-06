@@ -9,8 +9,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Edit, ChevronLeft, ChevronRight, Package, ZoomIn } from "lucide-react";
+// ScrollArea removed - tabs use overflow-y-auto directly
+import { Edit, ChevronLeft, ChevronRight, Package, ZoomIn, ShieldCheck, CheckCircle2, XCircle, Clock, Minus } from "lucide-react";
+import { differenceInDays } from "date-fns";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -29,7 +30,6 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { CheckOutDialog } from "@/components/helpdesk/assets/CheckOutDialog";
 import { CheckInDialog } from "@/components/helpdesk/assets/CheckInDialog";
 import { RepairAssetDialog } from "@/components/helpdesk/assets/RepairAssetDialog";
-import { MarkAsLostDialog } from "@/components/helpdesk/assets/MarkAsLostDialog";
 import { ReplicateAssetDialog } from "@/components/helpdesk/assets/ReplicateAssetDialog";
 import { DisposeAssetDialog } from "@/components/helpdesk/assets/DisposeAssetDialog";
 import { canCheckIn, canCheckOut } from "@/lib/assetStatusUtils";
@@ -44,7 +44,6 @@ const AssetDetail = () => {
   const [checkOutDialogOpen, setCheckOutDialogOpen] = useState(false);
   const [checkInDialogOpen, setCheckInDialogOpen] = useState(false);
   const [repairDialogOpen, setRepairDialogOpen] = useState(false);
-  const [lostDialogOpen, setLostDialogOpen] = useState(false);
   const [replicateDialogOpen, setReplicateDialogOpen] = useState(false);
   const [disposeDialogOpen, setDisposeDialogOpen] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -52,39 +51,32 @@ const AssetDetail = () => {
   // Fetch asset details with related data including user lookups
   const { data: asset, isLoading } = useQuery({
     queryKey: ["itam-asset-detail", assetId],
+    placeholderData: (prev) => prev,
     queryFn: async () => {
-      let { data, error } = await supabase
-        .from("itam_assets")
-        .select(`
+      const selectFields = `
           *,
           category:itam_categories(id, name),
           department:itam_departments(id, name),
           location:itam_locations(id, name, site:itam_sites(id, name)),
           make:itam_makes(id, name),
           vendor:itam_vendors(id, name)
-        `)
-        .eq("asset_tag", assetId)
+        `;
+
+      // Single OR query instead of sequential fallback lookups
+      const sanitizedId = assetId!.replace(/[",\\()]/g, "");
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sanitizedId);
+      
+      let orFilter = `asset_tag.eq.${sanitizedId},asset_id.eq.${sanitizedId}`;
+      if (isUuid) orFilter += `,id.eq.${sanitizedId}`;
+
+      const { data, error } = await supabase
+        .from("itam_assets")
+        .select(selectFields)
+        .or(orFilter)
         .maybeSingle();
       
-      // Fallback: try querying by id if asset_tag lookup returns null
-      if (!data && !error) {
-        const { data: byId, error: idError } = await supabase
-          .from("itam_assets")
-          .select(`
-            *,
-            category:itam_categories(id, name),
-            department:itam_departments(id, name),
-            location:itam_locations(id, name, site:itam_sites(id, name)),
-            make:itam_makes(id, name),
-            vendor:itam_vendors(id, name)
-          `)
-          .eq("id", assetId)
-          .maybeSingle();
-        if (idError) throw idError;
-        if (!byId) return null;
-        data = byId;
-      }
       if (error) throw error;
+      if (!data) return null;
       
       // Fetch assigned user separately if assigned_to exists
       let assignedUser = null;
@@ -120,33 +112,35 @@ const AssetDetail = () => {
       // Get current asset's created_at for cursor-based navigation
       const { data: currentAsset } = await supabase
         .from("itam_assets")
-        .select("created_at")
-        .eq("asset_tag", assetId)
-        .single();
+        .select("created_at, asset_tag, asset_id")
+        .or(`asset_tag.eq."${assetId!.replace(/[",\\()]/g, "")}",asset_id.eq."${assetId!.replace(/[",\\()]/g, "")}"`)
+        .maybeSingle();
       
       if (!currentAsset) return { prev: null, next: null };
       
       // Get previous asset (newer than current)
       const { data: prevAsset } = await supabase
         .from("itam_assets")
-        .select("asset_tag")
+        .select("asset_tag, asset_id")
         .eq("is_active", true)
         .gt("created_at", currentAsset.created_at)
         .order("created_at", { ascending: true })
         .limit(1)
-        .single();
+        .maybeSingle();
       
       // Get next asset (older than current)
       const { data: nextAsset } = await supabase
         .from("itam_assets")
-        .select("asset_tag")
+        .select("asset_tag, asset_id")
         .eq("is_active", true)
         .lt("created_at", currentAsset.created_at)
         .order("created_at", { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
       
-      return { prev: prevAsset?.asset_tag || null, next: nextAsset?.asset_tag || null };
+      const prevNav = prevAsset?.asset_tag || prevAsset?.asset_id || null;
+      const nextNav = nextAsset?.asset_tag || nextAsset?.asset_id || null;
+      return { prev: prevNav, next: nextNav };
     },
     enabled: !!assetId
   });
@@ -165,25 +159,6 @@ const AssetDetail = () => {
       navigate(`/assets/detail/${adjacentAssets.next}`);
     }
   };
-
-  // Mutation for updating asset status (only used for dispose now)
-  const updateAssetStatus = useMutation({
-    mutationFn: async ({ status }: { status: string }) => {
-      const { error } = await supabase
-        .from("itam_assets")
-        .update({ status })
-        .eq("id", asset?.id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      invalidateAllAssetQueries(queryClient);
-      toast.success("Asset status updated successfully");
-    },
-    onError: (error) => {
-      toast.error("Failed to update asset status");
-      console.error(error);
-    }
-  });
 
   // Mutation for soft-deleting asset
   const deleteAsset = useMutation({
@@ -228,9 +203,6 @@ const AssetDetail = () => {
       case "check_out":
         setCheckOutDialogOpen(true);
         break;
-      case "lost":
-        setLostDialogOpen(true);
-        break;
       case "repair":
         setRepairDialogOpen(true);
         break;
@@ -248,18 +220,18 @@ const AssetDetail = () => {
 
   const getStatusColor = (status: string | null) => {
     switch (status) {
-      case "available": return "default";
-      case "in_use": return "secondary";
-      case "maintenance": return "destructive";
-      case "retired": return "outline";
-      case "disposed": return "destructive";
-      case "lost": return "outline";
-      default: return "secondary";
+      case "available": return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400";
+      case "in_use": return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400";
+      case "maintenance": return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400";
+      case "retired": return "bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-400";
+      case "disposed": return "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400";
+      case "lost": return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400";
+      default: return "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400";
     }
   };
 
   // Keyboard shortcuts — disabled when any dialog is open
-  const anyDialogOpen = deleteConfirmOpen || imagePreviewOpen || checkOutDialogOpen || checkInDialogOpen || repairDialogOpen || lostDialogOpen || replicateDialogOpen || disposeDialogOpen;
+  const anyDialogOpen = deleteConfirmOpen || imagePreviewOpen || checkOutDialogOpen || checkInDialogOpen || repairDialogOpen || replicateDialogOpen || disposeDialogOpen;
   useKeyboardShortcuts([
     { key: "Escape", callback: () => { if (!anyDialogOpen) navigate("/assets/allassets"); } },
     { key: "ArrowLeft", callback: () => { if (!anyDialogOpen) goToPrev(); } },
@@ -302,7 +274,7 @@ const AssetDetail = () => {
   if (!asset) {
     return (
       <div className="flex flex-col items-center justify-center py-12 gap-3">
-        <Package className="h-12 w-12 text-muted-foreground" />
+        <Package className="h-8 w-8 text-muted-foreground" />
         <h2 className="text-lg font-semibold">Asset not found</h2>
         <p className="text-sm text-muted-foreground">The asset you're looking for doesn't exist or has been removed.</p>
         <Button variant="outline" onClick={() => navigate("/assets/allassets")}>Back to Assets</Button>
@@ -368,15 +340,56 @@ const AssetDetail = () => {
               <DropdownMenuItem onClick={() => handleAction("dispose")}>
                 Dispose
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleAction("lost")}>
-                Mark as Lost
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleAction("delete")} className="text-red-600">
+              <DropdownMenuItem onClick={() => handleAction("delete")} className="text-destructive">
                 Delete
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => handleAction("replicate")}>
                 Replicate
               </DropdownMenuItem>
+              {asset.assigned_to && (
+                <DropdownMenuItem onClick={async () => {
+                  try {
+                    const { data: userData } = await supabase
+                      .from("users")
+                      .select("id, email, name")
+                      .eq("id", asset.assigned_to)
+                      .single();
+                    if (!userData?.email) { toast.error("No email found for assigned user"); return; }
+                    const token = crypto.randomUUID();
+                    const { data: confirmation, error: confError } = await supabase
+                      .from("itam_asset_confirmations")
+                      .insert({ user_id: userData.id, status: "pending", token })
+                      .select("id")
+                      .single();
+                    if (confError) throw confError;
+                    await supabase.from("itam_asset_confirmation_items").insert({
+                      confirmation_id: confirmation.id,
+                      asset_id: asset.id,
+                      status: "pending",
+                    });
+                    await supabase.functions.invoke("send-asset-email", {
+                      body: {
+                        to: userData.email,
+                        userName: userData.name || userData.email,
+                        template: "asset_confirmation",
+                        data: {
+                          confirmationId: confirmation.id,
+                          token,
+                          assets: [{ asset_tag: asset.asset_tag || asset.asset_id, name: asset.name }],
+                        },
+                      },
+                    });
+                    toast.success("Confirmation email sent");
+                    invalidateQueries();
+                  } catch (err) {
+                    console.error(err);
+                    toast.error("Failed to send confirmation email");
+                  }
+                }}>
+                  <ShieldCheck className="h-4 w-4 mr-2" />
+                  Send Confirmation
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -418,7 +431,7 @@ const AssetDetail = () => {
                   return (
                     <div className="w-40 h-28 rounded-lg border bg-muted flex items-center justify-center overflow-hidden">
                       <div className="text-center p-3">
-                        <Package className="h-10 w-10 mx-auto mb-1 text-muted-foreground" />
+                        <Package className="h-8 w-8 mx-auto mb-1 text-muted-foreground" />
                         <p className="text-xs text-muted-foreground truncate max-w-[120px]">{asset.model || 'No Image'}</p>
                       </div>
                     </div>
@@ -428,29 +441,29 @@ const AssetDetail = () => {
 
               {/* Asset Details - Two Tables */}
               <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3">
-                {/* Left Table */}
+              {/* Left Table */}
                 <div className="border rounded-lg overflow-hidden">
                   <table className="w-full text-xs">
                     <tbody>
                       <tr className="border-b">
-                        <td className="p-1.5 font-semibold">Asset Tag</td>
-                        <td className="p-1.5 font-medium text-primary">{asset.asset_tag || '—'}</td>
+                        <td className="p-2 font-semibold w-[120px] text-muted-foreground">Asset Tag</td>
+                        <td className="p-2 font-medium text-primary">{asset.asset_tag || '—'}</td>
                       </tr>
                       <tr className="border-b">
-                        <td className="p-1.5 font-semibold">Serial Number</td>
-                        <td className="p-1.5">{asset.serial_number || '—'}</td>
+                        <td className="p-2 font-semibold w-[120px] text-muted-foreground">Serial Number</td>
+                        <td className="p-2">{asset.serial_number || '—'}</td>
                       </tr>
                       <tr className="border-b">
-                        <td className="p-1.5 font-semibold">Purchase Date</td>
-                        <td className="p-1.5">{asset.purchase_date ? format(new Date(asset.purchase_date), "dd/MM/yyyy") : '—'}</td>
+                        <td className="p-2 font-semibold w-[120px] text-muted-foreground">Purchase Date</td>
+                        <td className="p-2">{asset.purchase_date ? format(new Date(asset.purchase_date), "dd/MM/yyyy") : '—'}</td>
                       </tr>
                       <tr className="border-b">
-                        <td className="p-1.5 font-semibold">Purchase Price</td>
-                        <td className="p-1.5 font-semibold">{getCurrencySymbol()}{asset.purchase_price?.toLocaleString() || '0.00'}</td>
+                        <td className="p-2 font-semibold w-[120px] text-muted-foreground">Purchase Price</td>
+                        <td className="p-2 font-semibold">{getCurrencySymbol()}{asset.purchase_price?.toLocaleString() || '0.00'}</td>
                       </tr>
                       <tr>
-                        <td className="p-1.5 font-semibold">Model</td>
-                        <td className="p-1.5">{asset.model || '—'}</td>
+                        <td className="p-2 font-semibold w-[120px] text-muted-foreground">Model</td>
+                        <td className="p-2">{asset.model || '—'}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -461,27 +474,42 @@ const AssetDetail = () => {
                   <table className="w-full text-xs">
                     <tbody>
                       <tr className="border-b">
-                        <td className="p-1.5 font-semibold">Make</td>
-                        <td className="p-1.5">{asset.make?.name || '—'}</td>
+                        <td className="p-2 font-semibold w-[120px] text-muted-foreground">Make</td>
+                        <td className="p-2">{asset.make?.name || '—'}</td>
                       </tr>
                       <tr className="border-b">
-                        <td className="p-1.5 font-semibold">Location</td>
-                        <td className="p-1.5">{asset.location?.name || '—'}</td>
+                        <td className="p-2 font-semibold w-[120px] text-muted-foreground">Location</td>
+                        <td className="p-2">{asset.location?.name || '—'}</td>
                       </tr>
                       <tr className="border-b">
-                        <td className="p-1.5 font-semibold">Category</td>
-                        <td className="p-1.5">{asset.category?.name || '—'}</td>
+                        <td className="p-2 font-semibold w-[120px] text-muted-foreground">Category</td>
+                        <td className="p-2">{asset.category?.name || '—'}</td>
                       </tr>
                       <tr className="border-b">
-                        <td className="p-1.5 font-semibold">Department</td>
-                        <td className="p-1.5">{asset.department?.name || '—'}</td>
+                        <td className="p-2 font-semibold w-[120px] text-muted-foreground">Department</td>
+                        <td className="p-2">{asset.department?.name || '—'}</td>
+                      </tr>
+                      <tr className="border-b">
+                        <td className="p-2 font-semibold w-[120px] text-muted-foreground">Status</td>
+                        <td className="p-2">
+                          <Badge variant="outline" className={`${getStatusColor(asset.status)} capitalize text-xs`}>
+                            {(asset.status || 'available').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                          </Badge>
+                        </td>
                       </tr>
                       <tr>
-                        <td className="p-1.5 font-semibold">Status</td>
-                        <td className="p-1.5">
-                          <Badge variant="outline" className={`${getStatusColor(asset.status) === 'default' ? 'bg-green-100 text-green-800' : ''} capitalize text-xs`}>
-                            {asset.status === 'in_use' ? 'Checked out' : asset.status || 'available'}
-                          </Badge>
+                        <td className="p-2 font-semibold w-[120px] text-muted-foreground">Verified</td>
+                        <td className="p-2">
+                          {(() => {
+                            const cs = asset.confirmation_status;
+                            const lc = asset.last_confirmed_at;
+                            const isAssigned = !!asset.assigned_to;
+                            const isOverdue = isAssigned && (!lc || differenceInDays(new Date(), new Date(lc)) > 60);
+                            if (cs === "confirmed" && !isOverdue) return <Badge variant="outline" className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 text-xs gap-1"><CheckCircle2 className="h-3 w-3" />Confirmed</Badge>;
+                            if (cs === "denied") return <Badge variant="outline" className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 text-xs gap-1"><XCircle className="h-3 w-3" />Denied</Badge>;
+                            if (isOverdue) return <Badge variant="outline" className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 text-xs gap-1"><Clock className="h-3 w-3" />Overdue</Badge>;
+                            return <Badge variant="outline" className="text-xs gap-1"><Minus className="h-3 w-3" />Not verified</Badge>;
+                          })()}
                         </td>
                       </tr>
                     </tbody>
@@ -510,70 +538,48 @@ const AssetDetail = () => {
             <TabsTrigger value="history">History</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="details" className="flex-1 min-h-0 mt-3 data-[state=inactive]:hidden">
-            <ScrollArea className="h-full">
-              <DetailsTab asset={asset} />
-            </ScrollArea>
+          <TabsContent value="details" className="flex-1 min-h-0 mt-3 overflow-y-auto data-[state=inactive]:hidden">
+            <DetailsTab asset={asset} />
           </TabsContent>
 
-          <TabsContent value="warranty" className="flex-1 min-h-0 mt-3 data-[state=inactive]:hidden">
-            <ScrollArea className="h-full">
-              <WarrantyTab asset={asset} />
-            </ScrollArea>
+          <TabsContent value="warranty" className="flex-1 min-h-0 mt-3 overflow-y-auto data-[state=inactive]:hidden">
+            <WarrantyTab asset={asset} />
           </TabsContent>
 
-          <TabsContent value="events" className="flex-1 min-h-0 mt-3 data-[state=inactive]:hidden">
-            <ScrollArea className="h-full">
-              <EventsTab assetId={asset.id} />
-            </ScrollArea>
+          <TabsContent value="events" className="flex-1 min-h-0 mt-3 overflow-y-auto data-[state=inactive]:hidden">
+            <EventsTab assetId={asset.id} />
           </TabsContent>
 
-          <TabsContent value="docs" className="flex-1 min-h-0 mt-3 data-[state=inactive]:hidden">
-            <ScrollArea className="h-full">
-              <DocsTab assetId={asset.id} />
-            </ScrollArea>
+          <TabsContent value="docs" className="flex-1 min-h-0 mt-3 overflow-y-auto data-[state=inactive]:hidden">
+            <DocsTab assetId={asset.id} />
           </TabsContent>
 
-          <TabsContent value="photos" className="flex-1 min-h-0 mt-3 data-[state=inactive]:hidden">
-            <ScrollArea className="h-full">
-              <PhotosTab assetId={asset.id} />
-            </ScrollArea>
+          <TabsContent value="photos" className="flex-1 min-h-0 mt-3 overflow-y-auto data-[state=inactive]:hidden">
+            <PhotosTab assetId={asset.id} />
           </TabsContent>
 
-          <TabsContent value="reserve" className="flex-1 min-h-0 mt-3 data-[state=inactive]:hidden">
-            <ScrollArea className="h-full">
-              <ReserveTab assetId={asset.id} />
-            </ScrollArea>
+          <TabsContent value="reserve" className="flex-1 min-h-0 mt-3 overflow-y-auto data-[state=inactive]:hidden">
+            <ReserveTab assetId={asset.id} />
           </TabsContent>
 
-          <TabsContent value="maintenance" className="flex-1 min-h-0 mt-3 data-[state=inactive]:hidden">
-            <ScrollArea className="h-full">
-              <MaintenanceTab assetId={asset.id} />
-            </ScrollArea>
+          <TabsContent value="maintenance" className="flex-1 min-h-0 mt-3 overflow-y-auto data-[state=inactive]:hidden">
+            <MaintenanceTab assetId={asset.id} />
           </TabsContent>
 
-          <TabsContent value="contracts" className="flex-1 min-h-0 mt-3 data-[state=inactive]:hidden">
-            <ScrollArea className="h-full">
-              <ContractsTab assetId={asset.id} />
-            </ScrollArea>
+          <TabsContent value="contracts" className="flex-1 min-h-0 mt-3 overflow-y-auto data-[state=inactive]:hidden">
+            <ContractsTab asset={asset} />
           </TabsContent>
 
-          <TabsContent value="linking" className="flex-1 min-h-0 mt-3 data-[state=inactive]:hidden">
-            <ScrollArea className="h-full">
-              <LinkingTab assetId={asset.id} />
-            </ScrollArea>
+          <TabsContent value="linking" className="flex-1 min-h-0 mt-3 overflow-y-auto data-[state=inactive]:hidden">
+            <LinkingTab assetId={asset.id} />
           </TabsContent>
 
-          <TabsContent value="audit" className="flex-1 min-h-0 mt-3 data-[state=inactive]:hidden">
-            <ScrollArea className="h-full">
-              <AuditTab assetId={asset.id} />
-            </ScrollArea>
+          <TabsContent value="audit" className="flex-1 min-h-0 mt-3 overflow-y-auto data-[state=inactive]:hidden">
+            <AuditTab assetId={asset.id} />
           </TabsContent>
 
-          <TabsContent value="history" className="flex-1 min-h-0 mt-3 data-[state=inactive]:hidden">
-            <ScrollArea className="h-full">
-              <HistoryTab assetId={String(asset.id)} />
-            </ScrollArea>
+          <TabsContent value="history" className="flex-1 min-h-0 mt-3 overflow-y-auto data-[state=inactive]:hidden">
+            <HistoryTab assetId={String(asset.id)} />
           </TabsContent>
         </Tabs>
       </div>
@@ -582,8 +588,8 @@ const AssetDetail = () => {
       <ConfirmDialog
         open={deleteConfirmOpen}
         onOpenChange={setDeleteConfirmOpen}
-        title="Delete Asset"
-        description="Are you sure you want to delete this asset? This action cannot be undone."
+        title="Deactivate Asset"
+        description="Are you sure you want to deactivate this asset? This will deactivate the asset. An administrator can restore it if needed."
         confirmText="Delete"
         variant="destructive"
         onConfirm={() => deleteAsset.mutate()}
@@ -609,14 +615,6 @@ const AssetDetail = () => {
       <RepairAssetDialog
         open={repairDialogOpen}
         onOpenChange={setRepairDialogOpen}
-        assetId={asset.id}
-        assetName={asset.asset_tag || asset.name || 'Asset'}
-        onSuccess={invalidateQueries}
-      />
-
-      <MarkAsLostDialog
-        open={lostDialogOpen}
-        onOpenChange={setLostDialogOpen}
         assetId={asset.id}
         assetName={asset.asset_tag || asset.name || 'Asset'}
         onSuccess={invalidateQueries}

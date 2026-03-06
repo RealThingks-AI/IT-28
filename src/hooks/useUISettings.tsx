@@ -27,6 +27,7 @@ export interface DashboardPreferencesSetting {
   showFeeds: boolean;
   showAlerts: boolean;
   showCalendar: boolean;
+  feedFilters?: { newAssets: boolean; checkedOut: boolean; checkedIn: boolean; underRepair: boolean; disposed: boolean };
 }
 
 export interface SystemSettingsSetting {
@@ -37,11 +38,21 @@ export interface SystemSettingsSetting {
   language: string;
 }
 
+export interface CheckoutPreferencesSetting {
+  lastAssignee?: string;
+}
+
+export interface CheckinPreferencesSetting {
+  lastNotes?: string;
+}
+
 export interface UISettings {
   assetColumns?: AssetColumnSetting[];
   helpdeskColumns?: HelpdeskColumnSetting[];
   dashboardPreferences?: DashboardPreferencesSetting;
   systemSettings?: SystemSettingsSetting;
+  checkoutPreferences?: CheckoutPreferencesSetting;
+  checkinPreferences?: CheckinPreferencesSetting;
 }
 
 // localStorage keys to migrate

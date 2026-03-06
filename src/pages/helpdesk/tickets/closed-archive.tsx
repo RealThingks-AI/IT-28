@@ -16,6 +16,7 @@ export default function ClosedArchive() {
 
   const { data: closedTickets, isLoading } = useQuery({
     queryKey: ["closed-tickets"],
+    placeholderData: (prev) => prev,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("helpdesk_tickets")

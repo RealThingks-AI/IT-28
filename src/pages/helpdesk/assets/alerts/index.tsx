@@ -2,12 +2,12 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { AssetModuleTopBar } from "@/components/helpdesk/assets/AssetModuleTopBar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { StatCard } from "@/components/helpdesk/assets/StatCard";
 import { 
   AlertTriangle, 
   Wrench, 
@@ -15,14 +15,13 @@ import {
   Calendar,
   ExternalLink,
   Bell,
-  BellOff
 } from "lucide-react";
 import { format, differenceInDays } from "date-fns";
 
 const AlertsPage = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const initialTab = searchParams.get("type") || "warranty";
+  const [activeTab, setActiveTab] = useState(searchParams.get("type") || "warranty");
 
   // Fetch expiring warranties (next 30 days)
   const { data: expiringWarranties = [] } = useQuery({
@@ -36,9 +35,12 @@ const AlertsPage = () => {
         .eq("is_active", true)
         .not("warranty_expiry", "is", null)
         .lte("warranty_expiry", thirtyDaysFromNow.toISOString())
+        .gte("warranty_expiry", new Date().toISOString())
         .order("warranty_expiry", { ascending: true });
       return data || [];
     },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 
   // Fetch maintenance due
@@ -52,24 +54,47 @@ const AlertsPage = () => {
         .order("created_at", { ascending: true });
       return data || [];
     },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 
-  // Fetch overdue check-ins (using notes field as a workaround)
+  // Fetch overdue check-ins - properly filtered by expected_return_date
   const { data: overdueCheckins = [] } = useQuery({
-    queryKey: ["itam-overdue-checkins"],
+    queryKey: ["itam-overdue-checkins-alerts"],
     queryFn: async () => {
+      const today = new Date().toISOString().split('T')[0];
       const { data } = await supabase
         .from("itam_asset_assignments")
         .select("*, asset:itam_assets(id, name, asset_tag, asset_id)")
         .is("returned_at", null)
+        .not("expected_return_date", "is", null)
+        .lt("expected_return_date", today)
         .order("expected_return_date", { ascending: true });
       return data || [];
     },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 
-  // Fetch expiring licenses
+  // Fetch user names for overdue assignments
+  const { data: users = [] } = useQuery({
+    queryKey: ["users-for-alerts"],
+    queryFn: async () => {
+      const { data } = await supabase.from("users").select("id, name, email");
+      return data || [];
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+  });
+
+  const getUserName = (userId: string) => {
+    const user = users.find((u: any) => u.id === userId);
+    return user ? (user as any).name || (user as any).email || "Unknown" : "Unknown";
+  };
+
+  // Fetch expiring licenses - with .gte to exclude already-expired
   const { data: expiringLicenses = [] } = useQuery({
-    queryKey: ["itam-expiring-licenses"],
+    queryKey: ["itam-expiring-licenses-alerts"],
     queryFn: async () => {
       const thirtyDaysFromNow = new Date();
       thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
@@ -79,18 +104,28 @@ const AlertsPage = () => {
         .eq("is_active", true)
         .not("expiry_date", "is", null)
         .lte("expiry_date", thirtyDaysFromNow.toISOString())
+        .gte("expiry_date", new Date().toISOString())
         .order("expiry_date", { ascending: true });
       return data || [];
     },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 
   const getDaysUntil = (date: string) => {
     const days = differenceInDays(new Date(date), new Date());
-    if (days < 0) return { text: `${Math.abs(days)} days overdue`, variant: "destructive" as const };
+    if (days < 0) return { text: `${Math.abs(days)}d overdue`, variant: "destructive" as const };
     if (days === 0) return { text: "Today", variant: "destructive" as const };
     if (days <= 7) return { text: `${days} days`, variant: "destructive" as const };
     if (days <= 14) return { text: `${days} days`, variant: "outline" as const };
     return { text: `${days} days`, variant: "secondary" as const };
+  };
+
+  const getDaysOverdue = (date: string) => {
+    const days = differenceInDays(new Date(), new Date(date));
+    if (days <= 3) return { text: `${days}d overdue`, variant: "outline" as const };
+    if (days <= 14) return { text: `${days}d overdue`, variant: "destructive" as const };
+    return { text: `${days}d overdue`, variant: "destructive" as const };
   };
 
   const alertCounts = {
@@ -103,62 +138,33 @@ const AlertsPage = () => {
   const totalAlerts = Object.values(alertCounts).reduce((a, b) => a + b, 0);
 
   return (
-    <div className="min-h-screen bg-background">
-      <AssetModuleTopBar />
-      
+    <div className="h-full flex flex-col bg-background overflow-auto">
       <div className="p-4 space-y-4">
         {/* Summary Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className={`cursor-pointer transition-all ${initialTab === "warranty" ? "ring-2 ring-primary" : ""}`}>
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-purple-100">
-                <Calendar className="h-5 w-5 text-purple-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{alertCounts.warranty}</p>
-                <p className="text-xs text-muted-foreground">Warranty Expiring</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className={`cursor-pointer transition-all ${initialTab === "maintenance" ? "ring-2 ring-primary" : ""}`}>
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-yellow-100">
-                <Wrench className="h-5 w-5 text-yellow-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{alertCounts.maintenance}</p>
-                <p className="text-xs text-muted-foreground">Maintenance Due</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className={`cursor-pointer transition-all ${initialTab === "overdue" ? "ring-2 ring-primary" : ""}`}>
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-red-100">
-                <AlertTriangle className="h-5 w-5 text-red-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{alertCounts.overdue}</p>
-                <p className="text-xs text-muted-foreground">Assets Overdue</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className={`cursor-pointer transition-all ${initialTab === "licenses" ? "ring-2 ring-primary" : ""}`}>
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-blue-100">
-                <FileText className="h-5 w-5 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{alertCounts.licenses}</p>
-                <p className="text-xs text-muted-foreground">Licenses Expiring</p>
-              </div>
-            </CardContent>
-          </Card>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard
+            icon={Calendar} value={alertCounts.warranty} label="Warranty Expiring"
+            colorClass="bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400"
+            onClick={() => setActiveTab("warranty")} active={activeTab === "warranty"}
+          />
+          <StatCard
+            icon={Wrench} value={alertCounts.maintenance} label="Maintenance Due"
+            colorClass="bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400"
+            onClick={() => setActiveTab("maintenance")} active={activeTab === "maintenance"}
+          />
+          <StatCard
+            icon={AlertTriangle} value={alertCounts.overdue} label="Assets Overdue"
+            colorClass="bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400"
+            onClick={() => setActiveTab("overdue")} active={activeTab === "overdue"}
+          />
+          <StatCard
+            icon={FileText} value={alertCounts.licenses} label="Licenses Expiring"
+            colorClass="bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400"
+            onClick={() => setActiveTab("licenses")} active={activeTab === "licenses"}
+          />
         </div>
 
-        {/* Alert Details */}
+        {/* Alert Details - controlled tabs */}
         <Card>
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
@@ -169,7 +175,7 @@ const AlertsPage = () => {
             </div>
           </CardHeader>
           <CardContent className="p-0">
-            <Tabs defaultValue={initialTab} className="w-full">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               <TabsList className="w-full grid grid-cols-4 rounded-none border-b bg-transparent">
                 <TabsTrigger value="warranty" className="text-xs data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none">
                   Warranty ({alertCounts.warranty})
@@ -185,15 +191,15 @@ const AlertsPage = () => {
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="warranty" className="mt-0">
+              <TabsContent value="warranty" className="mt-0 animate-in fade-in-0 duration-200">
                 <Table>
-                  <TableHeader>
+                  <TableHeader className="bg-muted/50">
                     <TableRow>
                       <TableHead>Asset</TableHead>
                       <TableHead>Asset Tag</TableHead>
                       <TableHead>Warranty Expiry</TableHead>
                       <TableHead>Days Until</TableHead>
-                      <TableHead className="w-[100px]">Action</TableHead>
+                      <TableHead className="w-[80px]">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -230,15 +236,15 @@ const AlertsPage = () => {
                 </Table>
               </TabsContent>
 
-              <TabsContent value="maintenance" className="mt-0">
+              <TabsContent value="maintenance" className="mt-0 animate-in fade-in-0 duration-200">
                 <Table>
-                  <TableHeader>
+                  <TableHeader className="bg-muted/50">
                     <TableRow>
                       <TableHead>Asset</TableHead>
                       <TableHead>Issue</TableHead>
-                      <TableHead>Scheduled Date</TableHead>
+                      <TableHead>Created</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead className="w-[100px]">Action</TableHead>
+                      <TableHead className="w-[80px]">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -274,25 +280,32 @@ const AlertsPage = () => {
                 </Table>
               </TabsContent>
 
-              <TabsContent value="overdue" className="mt-0">
+              <TabsContent value="overdue" className="mt-0 animate-in fade-in-0 duration-200">
                 <Table>
-                  <TableHeader>
+                  <TableHeader className="bg-muted/50">
                     <TableRow>
                       <TableHead>Asset</TableHead>
                       <TableHead>Assigned To</TableHead>
                       <TableHead>Expected Return</TableHead>
                       <TableHead>Days Overdue</TableHead>
-                      <TableHead className="w-[100px]">Action</TableHead>
+                      <TableHead className="w-[80px]">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {overdueCheckins.map((assignment) => (
+                    {overdueCheckins.map((assignment) => {
+                      const expectedReturn = (assignment as any).expected_return_date as string;
+                      const daysInfo = getDaysOverdue(expectedReturn);
+                      return (
                         <TableRow key={assignment.id}>
                           <TableCell className="font-medium">{assignment.asset?.name || 'N/A'}</TableCell>
-                          <TableCell>{assignment.assigned_to || 'Unknown'}</TableCell>
-                          <TableCell>{format(new Date(assignment.assigned_at), 'MMM dd, yyyy')}</TableCell>
+                          <TableCell>{getUserName(assignment.assigned_to)}</TableCell>
                           <TableCell>
-                            <Badge variant="outline">Assigned</Badge>
+                            {expectedReturn
+                              ? format(new Date(expectedReturn), 'MMM dd, yyyy') 
+                              : 'N/A'}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={daysInfo.variant}>{daysInfo.text}</Badge>
                           </TableCell>
                           <TableCell>
                             <Button 
@@ -304,7 +317,8 @@ const AlertsPage = () => {
                             </Button>
                           </TableCell>
                         </TableRow>
-                    ))}
+                      );
+                    })}
                     {overdueCheckins.length === 0 && (
                       <TableRow>
                         <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
@@ -316,15 +330,15 @@ const AlertsPage = () => {
                 </Table>
               </TabsContent>
 
-              <TabsContent value="licenses" className="mt-0">
+              <TabsContent value="licenses" className="mt-0 animate-in fade-in-0 duration-200">
                 <Table>
-                  <TableHeader>
+                  <TableHeader className="bg-muted/50">
                     <TableRow>
                       <TableHead>License Name</TableHead>
                       <TableHead>Type</TableHead>
                       <TableHead>Expiry Date</TableHead>
                       <TableHead>Days Until</TableHead>
-                      <TableHead className="w-[100px]">Action</TableHead>
+                      <TableHead className="w-[80px]">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>

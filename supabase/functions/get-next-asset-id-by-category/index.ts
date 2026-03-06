@@ -71,13 +71,11 @@ serve(async (req) => {
     const prefix = tagFormat.prefix;
     const paddingLength = tagFormat.zero_padding || 2;
 
-    // Efficient approach: find the highest existing number for this prefix in one query
+    // Fetch all existing asset tags for this prefix to find gaps
     const { data: existingAssets, error: queryError } = await supabaseClient
       .from('itam_assets')
       .select('asset_tag')
-      .like('asset_tag', `${prefix}%`)
-      .order('asset_tag', { ascending: false })
-      .limit(100);
+      .like('asset_tag', `${prefix}%`);
 
     if (queryError) {
       console.error('Error querying existing assets:', queryError);
@@ -87,22 +85,26 @@ serve(async (req) => {
       );
     }
 
-    // Extract the highest number from existing asset tags
-    let maxNumber = 0;
+    // Extract all used numbers into a Set
+    const usedNumbers = new Set<number>();
     if (existingAssets && existingAssets.length > 0) {
       for (const asset of existingAssets) {
         const tag = asset.asset_tag;
         if (tag && tag.startsWith(prefix)) {
           const numPart = tag.substring(prefix.length);
           const num = parseInt(numPart, 10);
-          if (!isNaN(num) && num > maxNumber) {
-            maxNumber = num;
+          if (!isNaN(num) && num > 0) {
+            usedNumbers.add(num);
           }
         }
       }
     }
 
-    const nextNumber = maxNumber + 1;
+    // Find the first available gap starting from 1
+    let nextNumber = 1;
+    while (usedNumbers.has(nextNumber)) {
+      nextNumber++;
+    }
 
     const paddedNumber = nextNumber.toString().padStart(paddingLength, '0');
     const nextAssetId = `${prefix}${paddedNumber}`;

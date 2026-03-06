@@ -1,6 +1,7 @@
 // Currency conversion utility for subscriptions
+// DEPRECATED: Prefer native currency display using formatCost() from subscriptionUtils.
+// This module is kept for aggregate/summary conversions only.
 // All exchange rates are approximate and should be updated regularly
-
 const EXCHANGE_RATES_TO_INR: Record<string, number> = {
   INR: 1,
   USD: 83.0,

@@ -83,6 +83,7 @@ export default function TicketsDashboard() {
 
   const { data: allProblems } = useQuery({
     queryKey: ['helpdesk-problems-count'],
+    placeholderData: (prev) => prev,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('helpdesk_problems')

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -11,11 +11,15 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Package, Mail, User, MoreHorizontal, ExternalLink, RotateCcw, UserPlus, CheckSquare } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Package, Mail, User, MoreHorizontal, ExternalLink, RotateCcw, UserPlus, CheckSquare, Send, Loader2, CheckCircle2, XCircle, Minus, ShieldCheck } from "lucide-react";
 import { getStatusLabel } from "@/lib/assetStatusUtils";
 import { invalidateAllAssetQueries } from "@/lib/assetQueryUtils";
 import { useUsers } from "@/hooks/useUsers";
 import { toast } from "sonner";
+import { getAvatarColor } from "@/lib/avatarUtils";
+import { SortableTableHeader } from "@/components/helpdesk/SortableTableHeader";
+import { useSortableAssets } from "@/hooks/assets/useSortableAssets";
 
 interface Employee {
   id: string;
@@ -47,6 +51,11 @@ export function EmployeeAssetsDialog({ employee, open, onOpenChange }: EmployeeA
   const [bulkAction, setBulkAction] = useState<"reassign" | "return" | null>(null);
   const [bulkReassignUserId, setBulkReassignUserId] = useState("");
 
+  // Reset selection when employee changes
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [employee?.id]);
+
   // Fetch assets assigned to this employee
   const { data: assets = [], isLoading } = useQuery({
     queryKey: ["employee-assigned-assets", employee?.id, employee?.auth_user_id],
@@ -56,13 +65,109 @@ export function EmployeeAssetsDialog({ employee, open, onOpenChange }: EmployeeA
       const orFilter = ids.map(id => `assigned_to.eq.${id}`).join(',');
       const { data } = await supabase
         .from("itam_assets")
-        .select("id, name, asset_tag, asset_id, status, category:itam_categories(name)")
+        .select("id, name, asset_tag, asset_id, status, confirmation_status, last_confirmed_at, serial_number, model, custom_fields, category:itam_categories(name), make:itam_makes!make_id(name)")
         .or(orFilter)
         .eq("is_active", true)
         .order("name");
       return data || [];
     },
     enabled: !!employee?.id && open,
+  });
+
+  // Fetch last confirmation request for this employee
+  const { data: lastConfirmation } = useQuery({
+    queryKey: ["employee-last-confirmation", employee?.id],
+    queryFn: async () => {
+      if (!employee?.id) return null;
+      const { data } = await supabase
+        .from("itam_asset_confirmations")
+        .select("id, requested_at, status, completed_at")
+        .eq("user_id", employee.id)
+        .order("requested_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return data;
+    },
+    enabled: !!employee?.id && open,
+  });
+
+  // Send confirmation email mutation
+  const confirmWithUserMutation = useMutation({
+    mutationFn: async () => {
+      if (!employee) throw new Error("No employee selected");
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      // Get current user's app-level id
+      const { data: currentUser } = await supabase.from("users").select("id").eq("auth_user_id", user?.id).single();
+
+      // Create confirmation record
+      const { data: confirmation, error: confErr } = await supabase
+        .from("itam_asset_confirmations")
+        .insert({
+          user_id: employee.id,
+          requested_by: currentUser?.id || null,
+        })
+        .select("id, token")
+        .single();
+      if (confErr) throw confErr;
+
+      // Create confirmation items
+      const items = assets.map((a: any) => ({
+        confirmation_id: confirmation.id,
+        asset_id: a.id,
+        asset_tag: a.asset_id || a.asset_tag || null,
+        asset_name: a.name || null,
+      }));
+      const { data: insertedItems, error: itemsErr } = await supabase
+        .from("itam_asset_confirmation_items")
+        .insert(items)
+        .select("id, asset_id");
+      if (itemsErr) throw itemsErr;
+
+      // Map asset_id to confirmation item id
+      const itemIdMap = new Map((insertedItems || []).map((it: any) => [it.asset_id, it.id]));
+
+      // Build confirm/deny URLs using edge function
+      const supabaseUrl = "https://iarndwlbrmjbsjvugqvr.supabase.co";
+      const confirmAllUrl = `${supabaseUrl}/functions/v1/asset-confirmation?action=confirm_all&token=${confirmation.token}`;
+      const denyAllUrl = `${supabaseUrl}/functions/v1/asset-confirmation?action=deny_all&token=${confirmation.token}`;
+
+      // Build asset rows for email with full data and per-item action URLs
+      const emailAssets = assets.map((a: any) => {
+        const itemId = itemIdMap.get(a.id);
+        return {
+          asset_tag: a.asset_id || a.asset_tag || "N/A",
+          description: a.category?.name || a.name || "N/A",
+          brand: (a.make as any)?.name || "N/A",
+          model: a.model || "N/A",
+          serial_number: a.serial_number || null,
+          photo_url: (a.custom_fields as any)?.photo_url || null,
+          confirm_url: itemId ? `${supabaseUrl}/functions/v1/asset-confirmation?action=confirm_item&token=${confirmation.token}&item_id=${itemId}` : undefined,
+          deny_url: itemId ? `${supabaseUrl}/functions/v1/asset-confirmation?action=deny_item&token=${confirmation.token}&item_id=${itemId}` : undefined,
+        };
+      });
+
+      // Send email via send-asset-email
+      const { error: emailErr } = await supabase.functions.invoke("send-asset-email", {
+        body: {
+          templateId: "asset_confirmation",
+          recipientEmail: employee.email,
+          assets: emailAssets,
+          variables: {
+            user_name: employee.name || employee.email,
+            asset_count: String(assets.length),
+            confirm_all_url: confirmAllUrl,
+            deny_all_url: denyAllUrl,
+          },
+        },
+      });
+      if (emailErr) throw emailErr;
+    },
+    onSuccess: () => {
+      toast.success("Confirmation email sent to " + (employee?.name || employee?.email));
+      queryClient.invalidateQueries({ queryKey: ["employee-last-confirmation"] });
+    },
+    onError: (err: Error) => toast.error("Failed to send: " + err.message),
   });
 
   // Fetch assignment history
@@ -116,11 +221,22 @@ export function EmployeeAssetsDialog({ employee, open, onOpenChange }: EmployeeA
         assigned_at: new Date().toISOString(),
       });
 
+      // Resolve names for history
+      const fromName = employee?.name || employee?.email || employee?.id || "Unknown";
+      const toUser = allUsers.find(u => u.id === newUserId);
+      const toName = toUser?.name || toUser?.email || newUserId;
+
+      // Fetch asset tag
+      const { data: assetRecord } = await supabase.from("itam_assets").select("asset_tag").eq("id", assetId).single();
+
       // Log to history
       await supabase.from("itam_asset_history").insert({
         asset_id: assetId,
         action: "reassigned",
-        details: { from: employee?.id, to: newUserId },
+        old_value: fromName,
+        new_value: toName,
+        asset_tag: assetRecord?.asset_tag || null,
+        details: { from: fromName, to: toName },
         performed_by: user?.id,
       });
     },
@@ -166,12 +282,18 @@ export function EmployeeAssetsDialog({ employee, open, onOpenChange }: EmployeeA
         }
       }
 
-      // Log to history
+      // Log to history with resolved names
       const { data: { user } } = await supabase.auth.getUser();
+      const returnedFromName = employee?.name || employee?.email || employee?.id || "Unknown";
+      const { data: assetRec } = await supabase.from("itam_assets").select("asset_tag").eq("id", assetId).single();
+
       await supabase.from("itam_asset_history").insert({
         asset_id: assetId,
         action: "returned_to_stock",
-        details: { returned_from: employee?.id },
+        old_value: returnedFromName,
+        new_value: "Available",
+        asset_tag: assetRec?.asset_tag || null,
+        details: { returned_from: returnedFromName },
         performed_by: user?.id,
       });
     },
@@ -186,33 +308,89 @@ export function EmployeeAssetsDialog({ employee, open, onOpenChange }: EmployeeA
     onError: (err: Error) => toast.error("Failed to return: " + err.message),
   });
 
-  // Bulk return mutation
+  // Bulk return mutation — direct DB calls to avoid N toasts
   const bulkReturnMutation = useMutation({
     mutationFn: async (assetIds: string[]) => {
+      const { data: { user } } = await supabase.auth.getUser();
       for (const assetId of assetIds) {
-        await returnMutation.mutateAsync(assetId);
+        await supabase.from("itam_assets").update({
+          assigned_to: null, status: "available", updated_at: new Date().toISOString(),
+          checked_out_to: null, checked_out_at: null, expected_return_date: null, check_out_notes: null,
+        }).eq("id", assetId);
+
+        if (employee) {
+          const ids = [employee.id, employee.auth_user_id].filter(Boolean) as string[];
+          for (const uid of ids) {
+            await supabase.from("itam_asset_assignments")
+              .update({ returned_at: new Date().toISOString() })
+              .eq("asset_id", assetId).eq("assigned_to", uid).is("returned_at", null);
+          }
+        }
+
+        const returnFromName = employee?.name || employee?.email || employee?.id || "Unknown";
+        await supabase.from("itam_asset_history").insert({
+          asset_id: assetId, action: "returned_to_stock",
+          old_value: returnFromName, new_value: "Available",
+          details: { returned_from: returnFromName }, performed_by: user?.id,
+        });
       }
     },
     onSuccess: () => {
       toast.success(`${selectedIds.size} assets returned to stock`);
+      invalidateAllAssetQueries(queryClient);
+      queryClient.invalidateQueries({ queryKey: ["employee-assigned-assets"] });
+      queryClient.invalidateQueries({ queryKey: ["employee-asset-history"] });
+      queryClient.invalidateQueries({ queryKey: ["employee-asset-counts"] });
       setSelectedIds(new Set());
       setBulkAction(null);
     },
+    onError: (err: Error) => toast.error("Bulk return failed: " + err.message),
   });
 
-  // Bulk reassign mutation
+  // Bulk reassign mutation — direct DB calls to avoid N toasts
   const bulkReassignMutation = useMutation({
     mutationFn: async ({ assetIds, newUserId }: { assetIds: string[]; newUserId: string }) => {
+      const { data: { user } } = await supabase.auth.getUser();
       for (const assetId of assetIds) {
-        await reassignMutation.mutateAsync({ assetId, newUserId });
+        await supabase.from("itam_assets")
+          .update({ assigned_to: newUserId, status: "in_use", updated_at: new Date().toISOString() })
+          .eq("id", assetId);
+
+        if (employee) {
+          const ids = [employee.id, employee.auth_user_id].filter(Boolean) as string[];
+          for (const uid of ids) {
+            await supabase.from("itam_asset_assignments")
+              .update({ returned_at: new Date().toISOString() })
+              .eq("asset_id", assetId).eq("assigned_to", uid).is("returned_at", null);
+          }
+        }
+
+        await supabase.from("itam_asset_assignments").insert({
+          asset_id: assetId, assigned_to: newUserId,
+          assigned_by: user?.id || null, assigned_at: new Date().toISOString(),
+        });
+
+        const bulkFromName = employee?.name || employee?.email || employee?.id || "Unknown";
+        const bulkToUser = allUsers.find(u => u.id === newUserId);
+        const bulkToName = bulkToUser?.name || bulkToUser?.email || newUserId;
+        await supabase.from("itam_asset_history").insert({
+          asset_id: assetId, action: "reassigned",
+          old_value: bulkFromName, new_value: bulkToName,
+          details: { from: bulkFromName, to: bulkToName }, performed_by: user?.id,
+        });
       }
     },
     onSuccess: () => {
       toast.success(`${selectedIds.size} assets reassigned`);
+      invalidateAllAssetQueries(queryClient);
+      queryClient.invalidateQueries({ queryKey: ["employee-assigned-assets"] });
+      queryClient.invalidateQueries({ queryKey: ["employee-asset-history"] });
+      queryClient.invalidateQueries({ queryKey: ["employee-asset-counts"] });
       setSelectedIds(new Set());
       setBulkAction(null);
       setBulkReassignUserId("");
     },
+    onError: (err: Error) => toast.error("Bulk reassign failed: " + err.message),
   });
 
   const toggleSelect = (id: string) => {
@@ -233,11 +411,26 @@ export function EmployeeAssetsDialog({ employee, open, onOpenChange }: EmployeeA
 
   const selectedAssets = useMemo(() => assets.filter((a: any) => selectedIds.has(a.id)), [assets, selectedIds]);
 
+  const getColumnValue = useCallback((item: any, column: string): string | number => {
+    switch (column) {
+      case "name": return item.name || "";
+      case "asset_tag": return item.asset_id || item.asset_tag || "";
+      case "category": return item.category?.name || "";
+      case "status": return item.status || "";
+      default: return "";
+    }
+  }, []);
+
+  const { sortedData: sortedAssets, sortConfig, handleSort } = useSortableAssets(assets, getColumnValue, { initialColumn: "name", initialDirection: "asc" });
+
   if (!employee) return null;
 
   const initials = employee.name
     ? employee.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
     : employee.email[0].toUpperCase();
+
+  // Deterministic avatar color
+  const avatarColor = getAvatarColor(employee.name || employee.email);
 
   const statusColor: Record<string, string> = {
     available: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
@@ -253,7 +446,7 @@ export function EmployeeAssetsDialog({ employee, open, onOpenChange }: EmployeeA
           <DialogHeader>
             <DialogTitle className="flex items-center gap-3">
               <Avatar className="h-10 w-10">
-                <AvatarFallback className="bg-primary/10 text-primary font-medium">{initials}</AvatarFallback>
+                <AvatarFallback className={`font-medium ${avatarColor}`}>{initials}</AvatarFallback>
               </Avatar>
               <div>
                 <p className="text-lg font-semibold">{employee.name || "Unknown User"}</p>
@@ -263,6 +456,7 @@ export function EmployeeAssetsDialog({ employee, open, onOpenChange }: EmployeeA
                 </p>
               </div>
             </DialogTitle>
+            <DialogDescription>View and manage assets assigned to this employee.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-6 mt-2">
@@ -276,9 +470,40 @@ export function EmployeeAssetsDialog({ employee, open, onOpenChange }: EmployeeA
                 <span className={`h-2 w-2 rounded-full ${employee.status === "active" ? "bg-green-500" : "bg-red-500"}`} />
                 {employee.status === "active" ? "Active" : "Inactive"}
               </span>
-              <div className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
-                <Package className="h-4 w-4" />
-                {assets.length} asset{assets.length !== 1 ? 's' : ''} assigned
+              <div className="ml-auto flex items-center gap-3">
+                <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <Package className="h-4 w-4" />
+                  {assets.length} asset{assets.length !== 1 ? 's' : ''} assigned
+                </div>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={assets.length === 0 || confirmWithUserMutation.isPending}
+                        onClick={() => confirmWithUserMutation.mutate()}
+                        className="gap-1.5"
+                      >
+                        {confirmWithUserMutation.isPending ? (
+                          <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Sending...</>
+                        ) : (
+                          <><ShieldCheck className="h-3.5 w-3.5" /> Confirm with User</>
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Send email to {employee.name || employee.email} to confirm all assigned assets</p>
+                      {lastConfirmation && (
+                        <p className="text-xs mt-1">
+                          Last sent: {new Date(lastConfirmation.requested_at).toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" })}
+                          {" · "}
+                          {lastConfirmation.status === "completed" ? "✅ Completed" : lastConfirmation.status === "expired" ? "⏰ Expired" : "⏳ Pending"}
+                        </p>
+                      )}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </div>
             </div>
 
@@ -320,27 +545,37 @@ export function EmployeeAssetsDialog({ employee, open, onOpenChange }: EmployeeA
                         )}
                       </TableHead>
                       
-                      <TableHead className="font-medium text-xs uppercase text-muted-foreground">Asset Tag</TableHead>
-                      <TableHead className="font-medium text-xs uppercase text-muted-foreground">Category</TableHead>
-                      <TableHead className="font-medium text-xs uppercase text-muted-foreground">Status</TableHead>
+                      <SortableTableHeader column="name" label="Name" sortConfig={sortConfig} onSort={handleSort} />
+                      <SortableTableHeader column="asset_tag" label="Asset Tag" sortConfig={sortConfig} onSort={handleSort} />
+                      <SortableTableHeader column="category" label="Category" sortConfig={sortConfig} onSort={handleSort} />
+                      <SortableTableHeader column="status" label="Status" sortConfig={sortConfig} onSort={handleSort} />
+                      <TableHead className="w-[70px] text-center">Confirmed</TableHead>
                       <TableHead className="w-[60px]">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {isLoading ? (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center py-8">
+                       <TableCell colSpan={7} className="text-center py-8">
                           <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto" />
                         </TableCell>
                       </TableRow>
                     ) : assets.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                          No assets currently assigned
+                        <TableCell colSpan={7} className="text-center py-10 text-muted-foreground">
+                          <Package className="h-8 w-8 mx-auto mb-2 opacity-40" />
+                          <p className="text-sm">No assets currently assigned</p>
+                          <Button size="sm" variant="outline" className="mt-3" onClick={() => {
+                            onOpenChange(false);
+                            navigate(`/assets/checkout?user=${employee?.id}`);
+                          }}>
+                            <Package className="h-3.5 w-3.5 mr-1.5" />
+                            Assign an Asset
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ) : (
-                      assets.map((asset: any) => (
+                      sortedAssets.map((asset: any) => (
                         <TableRow key={asset.id} className={selectedIds.has(asset.id) ? "bg-primary/5" : ""}>
                           <TableCell>
                             <Checkbox
@@ -349,6 +584,7 @@ export function EmployeeAssetsDialog({ employee, open, onOpenChange }: EmployeeA
                               aria-label={`Select ${asset.name}`}
                             />
                           </TableCell>
+                          <TableCell className="font-medium text-sm">{asset.name || "—"}</TableCell>
                           <TableCell>
                             <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
                               {asset.asset_id || asset.asset_tag || "—"}
@@ -359,6 +595,28 @@ export function EmployeeAssetsDialog({ employee, open, onOpenChange }: EmployeeA
                             <Badge variant="secondary" className={`text-xs ${statusColor[asset.status] || ""}`}>
                               {getStatusLabel(asset.status)}
                             </Badge>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger>
+                                  {asset.confirmation_status === "confirmed" ? (
+                                    <CheckCircle2 className="h-4 w-4 text-green-500 mx-auto" />
+                                  ) : asset.confirmation_status === "denied" ? (
+                                    <XCircle className="h-4 w-4 text-destructive mx-auto" />
+                                  ) : (
+                                    <Minus className="h-4 w-4 text-muted-foreground mx-auto" />
+                                  )}
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  {asset.confirmation_status === "confirmed" 
+                                    ? `Confirmed${asset.last_confirmed_at ? ` on ${new Date(asset.last_confirmed_at).toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" })}` : ""}`
+                                    : asset.confirmation_status === "denied"
+                                    ? "Denied by user — needs review"
+                                    : "Not yet confirmed"}
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
                           </TableCell>
                           <TableCell>
                             <DropdownMenu>
