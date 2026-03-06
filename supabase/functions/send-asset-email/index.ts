@@ -422,6 +422,17 @@ serve(async (req) => {
       }
     }
 
+    // Safety net: auto-generate confirm/deny URLs from token if missing
+    if (templateId === "asset_confirmation" && variables.token) {
+      const baseUrl = Deno.env.get("SUPABASE_URL") + "/functions/v1/asset-confirmation";
+      if (!variables.confirm_all_url) {
+        variables.confirm_all_url = `${baseUrl}?action=confirm_all&token=${variables.token}`;
+      }
+      if (!variables.deny_all_url) {
+        variables.deny_all_url = `${baseUrl}?action=deny_all&token=${variables.token}`;
+      }
+    }
+
     const assetTableHtml = assetRows.length > 0 ? buildAssetTableHtml(assetRows) : undefined;
 
     const allVars = { ...assetVars, ...variables };
